@@ -17,6 +17,8 @@ import { WsHub } from './realtime/ws-hub.js';
 import { StateStore } from './state/state-store.js';
 import { EventCoalescer } from './state/event-coalescer.js';
 import { wireOBSToState } from './state/wire.js';
+import { CommandBus } from './obs/command-bus.js';
+import { AuditRepo } from './audit/audit-repo.js';
 
 export interface BuildOptions {
   test?: boolean;
@@ -33,6 +35,8 @@ declare module 'fastify' {
     passwordKey: Buffer;
     obsManager: ConnectionManager;
     hub: WsHub;
+    audit: AuditRepo;
+    commandBus: CommandBus;
   }
 }
 
@@ -88,8 +92,13 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
 
   await registerConnectionRoutes(server, requireSession);
 
+  const audit = new AuditRepo(db);
+  const commandBus = new CommandBus(obsManager, audit);
+  server.decorate('audit', audit);
+  server.decorate('commandBus', commandBus);
+
   const stateStore = new StateStore();
-  const hub = new WsHub(server, stateStore);
+  const hub = new WsHub(server, stateStore, commandBus);
   server.decorate('hub', hub);
   const coalescer = new EventCoalescer((diff) => {
     if (stateStore.applyDiff(diff)) hub.broadcastDiff(diff);
