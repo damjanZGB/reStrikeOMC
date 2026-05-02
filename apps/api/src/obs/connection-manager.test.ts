@@ -77,6 +77,22 @@ describe('ConnectionManager — call', () => {
   });
 });
 
+describe('ConnectionManager — reconnect', () => {
+  it('reconnects after the OBS server bounces', async () => {
+    const id = '00000000-0000-0000-0000-000000000040';
+    await mgr.add({ id, host: '127.0.0.1', port: mock.port, password: null });
+    await mgr.waitForStatus(id, 'connected', 2000);
+
+    await mock.close();
+    await mgr.waitForStatus(id, 'disconnected', 5000);
+
+    mock = await startMockObs({ password: null });
+    await mgr.remove(id);
+    await mgr.add({ id, host: '127.0.0.1', port: mock.port, password: null });
+    await mgr.waitForStatus(id, 'connected', 5000);
+  }, 15000);
+});
+
 describe('ConnectionManager — events', () => {
   it('forwards CurrentProgramSceneChanged as obsEvent', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
