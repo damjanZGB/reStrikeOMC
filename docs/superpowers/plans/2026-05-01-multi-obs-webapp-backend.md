@@ -566,7 +566,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('cmd.result'),
-    id: z.string(),
+    id: z.string().min(1),
     ok: z.array(z.string().uuid()),
     failed: z.array(PerTargetFailureSchema),
   }),
