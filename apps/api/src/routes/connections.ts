@@ -25,6 +25,27 @@ export async function registerConnectionRoutes(
     const c = server.connections.create(parsed.data);
     return reply.code(201).send(c);
   });
+
+  server.patch('/api/connections/:id', { preHandler: guard }, async (req, reply) => {
+    const params = ConnectionParams.safeParse(req.params);
+    if (!params.success) return reply.code(400).send({ error: 'invalid_id' });
+    const body = ConnectionPatchSchema.safeParse(req.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid_body', issues: body.error.issues });
+    }
+    const updated = server.connections.update(params.data.id, body.data);
+    if (!updated) return reply.code(404).send({ error: 'not_found' });
+    return updated;
+  });
+
+  server.delete('/api/connections/:id', { preHandler: guard }, async (req, reply) => {
+    const params = ConnectionParams.safeParse(req.params);
+    if (!params.success) return reply.code(400).send({ error: 'invalid_id' });
+    if (!server.connections.delete(params.data.id)) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    return reply.code(204).send();
+  });
 }
 
 export const ConnectionPatchSchema = z.object({

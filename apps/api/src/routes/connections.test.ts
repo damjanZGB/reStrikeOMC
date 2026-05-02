@@ -73,3 +73,73 @@ describe('connections routes — list + create', () => {
     }
   });
 });
+
+describe('connections routes — update + delete', () => {
+  it('updates an existing connection', async () => {
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: { name: 'A', host: 'h', port: 4455 },
+      });
+      const id = created.json().id as string;
+      const r = await server.inject({
+        method: 'PATCH',
+        url: `/api/connections/${id}`,
+        headers: { cookie },
+        payload: { name: 'B' },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toMatchObject({ name: 'B' });
+    } finally {
+      await close();
+    }
+  });
+
+  it('returns 404 for unknown id', async () => {
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const r = await server.inject({
+        method: 'PATCH',
+        url: '/api/connections/00000000-0000-0000-0000-000000000000',
+        headers: { cookie },
+        payload: { name: 'B' },
+      });
+      expect(r.statusCode).toBe(404);
+    } finally {
+      await close();
+    }
+  });
+
+  it('deletes a connection', async () => {
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: { name: 'A', host: 'h', port: 4455 },
+      });
+      const id = created.json().id as string;
+      const r = await server.inject({
+        method: 'DELETE',
+        url: `/api/connections/${id}`,
+        headers: { cookie },
+      });
+      expect(r.statusCode).toBe(204);
+      const list = await server.inject({
+        method: 'GET',
+        url: '/api/connections',
+        headers: { cookie },
+      });
+      expect(list.json()).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+});
