@@ -46,6 +46,15 @@ export async function registerConnectionRoutes(
     }
     return reply.code(204).send();
   });
+
+  server.post('/api/connections/:id/test', { preHandler: guard }, async (req, reply) => {
+    const params = ConnectionParams.safeParse(req.params);
+    if (!params.success) return reply.code(400).send({ error: 'invalid_id' });
+    if (!server.connections.findById(params.data.id)) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    return { status: 'not_implemented' };
+  });
 }
 
 export const ConnectionPatchSchema = z.object({

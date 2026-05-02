@@ -143,3 +143,28 @@ describe('connections routes — update + delete', () => {
     }
   });
 });
+
+describe('connection test endpoint stub', () => {
+  it('returns not_implemented for now', async () => {
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: { name: 'A', host: 'h', port: 4455 },
+      });
+      const id = created.json().id as string;
+      const r = await server.inject({
+        method: 'POST',
+        url: `/api/connections/${id}/test`,
+        headers: { cookie },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toEqual({ status: 'not_implemented' });
+    } finally {
+      await close();
+    }
+  });
+});
