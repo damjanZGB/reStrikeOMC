@@ -498,8 +498,14 @@ describe('WS protocol messages', () => {
     const msg = {
       type: 'cmd.result',
       id: 'req-1',
-      ok: ['c1'],
-      failed: [{ connId: 'c2', code: 'SceneNotFound', message: 'no such scene' }],
+      ok: ['550e8400-e29b-41d4-a716-446655440001'],
+      failed: [
+        {
+          connId: '550e8400-e29b-41d4-a716-446655440002',
+          code: 'SceneNotFound',
+          message: 'no such scene',
+        },
+      ],
     };
     expect(ServerMessageSchema.parse(msg)).toEqual(msg);
   });
