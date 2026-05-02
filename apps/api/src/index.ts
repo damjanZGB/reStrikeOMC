@@ -13,6 +13,7 @@ import { startSessionPurgeTimer } from './auth/purge.js';
 import { ConnectionRepo } from './connections/repo.js';
 import { registerConnectionRoutes } from './routes/connections.js';
 import { ConnectionManager } from './obs/connection-manager.js';
+import { WsHub } from './realtime/ws-hub.js';
 
 export interface BuildOptions {
   test?: boolean;
@@ -28,6 +29,7 @@ declare module 'fastify' {
     sessions: SessionRepo;
     passwordKey: Buffer;
     obsManager: ConnectionManager;
+    hub: WsHub;
   }
 }
 
@@ -82,6 +84,12 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   }));
 
   await registerConnectionRoutes(server, requireSession);
+
+  const hub = new WsHub(server);
+  server.decorate('hub', hub);
+  server.addHook('onClose', async () => {
+    hub.close();
+  });
 
   return server;
 }
