@@ -1,11 +1,13 @@
 import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
+import fastifyCookie from '@fastify/cookie';
 import type { Db } from './db/sqlite.js';
 import { openDb, runMigrations } from './db/sqlite.js';
 import { UserRepo } from './auth/users.js';
 import { SessionRepo } from './auth/sessions.js';
 import { deriveKeyFromString } from './auth/crypto.js';
 import { registerSetupRoute } from './routes/setup.js';
+import { registerAuthRoutes } from './routes/auth.js';
 
 export interface BuildOptions {
   test?: boolean;
@@ -37,6 +39,8 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
 
   const server = Fastify({ logger: opts.test ? false : { level: 'info' } });
 
+  await server.register(fastifyCookie, { secret: sessionSecret });
+
   const db = openDb(dbPath);
   runMigrations(db);
 
@@ -56,6 +60,7 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   server.get('/health', async () => ({ status: 'ok' }));
 
   await registerSetupRoute(server);
+  await registerAuthRoutes(server);
 
   return server;
 }
