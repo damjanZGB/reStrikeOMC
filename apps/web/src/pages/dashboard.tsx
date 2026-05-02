@@ -7,6 +7,7 @@ import { useSelectionStore } from '@/state/selection';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { AudioMixer } from '@/components/audio-mixer';
 import { Wifi, WifiOff, Radio, RadioReceiver } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -164,6 +165,12 @@ export function DashboardPage(): JSX.Element {
               onSwitchScene={(name) =>
                 ws.dispatch('SetCurrentProgramScene', [conn.id], { sceneName: name })
               }
+              onMute={(inputName, muted) =>
+                ws.dispatch('SetInputMute', [conn.id], { inputName, muted })
+              }
+              onVolume={(inputName, volumeMul) =>
+                ws.dispatch('SetInputVolume', [conn.id], { inputName, volumeMul })
+              }
             />
           ))}
         </div>
@@ -178,12 +185,16 @@ function InstanceTile({
   selected,
   onToggle,
   onSwitchScene,
+  onMute,
+  onVolume,
 }: {
   conn: ConnectionConfig;
   live: InstanceState | undefined;
   selected: boolean;
   onToggle: () => void;
   onSwitchScene: (name: string) => void;
+  onMute: (inputName: string, muted: boolean) => void;
+  onVolume: (inputName: string, volumeMul: number) => void;
 }): JSX.Element {
   const status = live?.status ?? 'disconnected';
   const statusColor =
@@ -245,6 +256,7 @@ function InstanceTile({
                 record: {live.outputs.recording.active ? '🔴 on' : 'off'}
               </span>
             </div>
+            <AudioMixer inputs={live.inputs} onMute={onMute} onVolume={onVolume} />
           </>
         ) : (
           <p className="text-sm text-muted-foreground">No live state — backend not connected to this OBS yet.</p>
