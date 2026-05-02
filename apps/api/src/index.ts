@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 export interface BuildOptions {
@@ -14,7 +15,7 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   return server;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT ?? 8080);
   const host = process.env.HOST ?? '0.0.0.0';
   const server = await buildServer();
