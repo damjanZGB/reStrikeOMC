@@ -1,0 +1,16 @@
+{
+  "name": "restrike-omc-web",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/**\" build && pnpm -r --filter \"./apps/**\" build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "dev:api": "pnpm --filter @restrike/api dev",
+    "dev:web": "pnpm --filter @restrike/web dev"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3"
+  },
+  "packageManager": "pnpm@9.12.0"
+}
