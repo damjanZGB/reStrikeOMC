@@ -9,6 +9,7 @@ import { deriveKeyFromString } from './auth/crypto.js';
 import { registerSetupRoute } from './routes/setup.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { makeRequireSession } from './auth/middleware.js';
+import { startSessionPurgeTimer } from './auth/purge.js';
 
 export interface BuildOptions {
   test?: boolean;
@@ -54,7 +55,9 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   server.decorate('sessions', sessions);
   server.decorate('passwordKey', passwordKey);
 
+  const stopPurge = startSessionPurgeTimer(sessions);
   server.addHook('onClose', async () => {
+    stopPurge();
     db.close();
   });
 

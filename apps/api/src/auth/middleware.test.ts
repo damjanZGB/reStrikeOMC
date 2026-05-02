@@ -13,7 +13,7 @@ async function loginAndGetCookie(server: FastifyInstance): Promise<string> {
     url: '/api/auth/login',
     payload: { username: 'alice', password: 'longenoughpw' },
   });
-  return String(res.headers['set-cookie']).split(';')[0];
+  return String(res.headers['set-cookie']).split(';')[0] ?? '';
 }
 
 describe('requireSession', () => {
