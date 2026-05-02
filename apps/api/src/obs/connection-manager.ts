@@ -177,6 +177,20 @@ export class ConnectionManager extends EventEmitter {
     });
   }
 
+  async call(
+    connId: string,
+    requestType: string,
+    requestData: Record<string, unknown>
+  ): Promise<unknown> {
+    const slot = this.slots.get(connId);
+    if (!slot) throw new Error(`unknown conn ${connId}`);
+    if (slot.status !== 'connected') {
+      throw new Error(`conn ${connId} not connected (status=${slot.status})`);
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return slot.client.call(requestType as any, requestData as any);
+  }
+
   async remove(id: string): Promise<void> {
     const slot = this.slots.get(id);
     if (!slot) return;

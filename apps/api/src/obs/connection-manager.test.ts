@@ -44,6 +44,39 @@ describe('ConnectionManager — lifecycle', () => {
   });
 });
 
+describe('ConnectionManager — call', () => {
+  it('dispatches a SetCurrentProgramScene request and resolves', async () => {
+    await mgr.add({
+      id: '00000000-0000-0000-0000-000000000020',
+      host: '127.0.0.1',
+      port: mock.port,
+      password: null,
+    });
+    await mgr.waitForStatus('00000000-0000-0000-0000-000000000020', 'connected', 2000);
+    await mgr.call('00000000-0000-0000-0000-000000000020', 'SetCurrentProgramScene', {
+      sceneName: 'Scene 2',
+    });
+  });
+
+  it('rejects when target does not exist', async () => {
+    await expect(
+      mgr.call('00000000-0000-0000-0000-000000000099', 'GetVersion', {})
+    ).rejects.toThrow(/unknown conn/);
+  });
+
+  it('rejects when status is not connected', async () => {
+    await mgr.add({
+      id: '00000000-0000-0000-0000-000000000021',
+      host: '127.0.0.1',
+      port: 1,
+      password: null,
+    });
+    await expect(
+      mgr.call('00000000-0000-0000-0000-000000000021', 'GetVersion', {})
+    ).rejects.toThrow(/not connected/);
+  });
+});
+
 describe('ConnectionManager — initial sync', () => {
   it('emits a snapshot event with scenes and inputs after connect', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
