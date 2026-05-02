@@ -65,4 +65,10 @@ export const api = {
       `/api/connections/${id}/test`,
       { method: 'POST' }
     ),
+  discover: (port?: number) => {
+    const qs = port ? `?port=${port}` : '';
+    return jsonFetch<{ hosts: Array<{ host: string; port: number }> }>(
+      `/api/discover${qs}`
+    );
+  },
 };

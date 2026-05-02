@@ -15,7 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Trash2, Wifi } from 'lucide-react';
+import { Trash2, Wifi, Radar } from 'lucide-react';
 
 interface FormState {
   name: string;
@@ -31,6 +31,7 @@ export function ConnectionsPage(): JSX.Element {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(empty);
   const [testStatus, setTestStatus] = useState<Record<string, string>>({});
+  const [discoverOpen, setDiscoverOpen] = useState(false);
 
   const list = useQuery({ queryKey: ['connections'], queryFn: api.listConnections });
 
@@ -56,10 +57,85 @@ export function ConnectionsPage(): JSX.Element {
       setTestStatus((prev) => ({ ...prev, [id]: 'error' })),
   });
 
+  const discover = useMutation({
+    mutationFn: () => api.discover(4455),
+  });
+
   return (
     <div className="grid gap-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Connections</h1>
+        <div className="flex gap-2">
+          <Dialog
+            open={discoverOpen}
+            onOpenChange={(v) => {
+              setDiscoverOpen(v);
+              if (v && !discover.data) discover.mutate();
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Radar className="h-4 w-4 mr-2" />
+                Discover LAN
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Discover OBS instances</DialogTitle>
+                <DialogDescription>
+                  Scans your local subnet for hosts responding on port 4455. May take a few seconds.
+                </DialogDescription>
+              </DialogHeader>
+              {discover.isPending ? (
+                <p className="text-sm text-muted-foreground">Scanning...</p>
+              ) : discover.isError ? (
+                <p className="text-sm text-destructive">
+                  {(discover.error as Error).message}
+                </p>
+              ) : discover.data && discover.data.hosts.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No hosts responded. Make sure obs-websocket is enabled and reachable.
+                </p>
+              ) : (
+                <ul className="grid gap-2">
+                  {discover.data?.hosts.map((h) => (
+                    <li
+                      key={`${h.host}:${h.port}`}
+                      className="flex items-center justify-between border rounded-md px-3 py-2"
+                    >
+                      <span className="font-mono text-sm">
+                        {h.host}:{h.port}
+                      </span>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setForm({
+                            name: `OBS @ ${h.host}`,
+                            host: h.host,
+                            port: String(h.port),
+                            password: '',
+                          });
+                          setDiscoverOpen(false);
+                          setOpen(true);
+                        }}
+                      >
+                        Add
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => discover.mutate()}
+                  disabled={discover.isPending}
+                >
+                  {discover.isPending ? 'Scanning...' : 'Re-scan'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button>Add connection</Button>
@@ -130,6 +206,7 @@ export function ConnectionsPage(): JSX.Element {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {list.isLoading ? (

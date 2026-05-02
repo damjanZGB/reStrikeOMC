@@ -8,6 +8,7 @@ import { SessionRepo } from './auth/sessions.js';
 import { deriveKeyFromString } from './auth/crypto.js';
 import { registerSetupRoute } from './routes/setup.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { registerDiscoverRoute } from './routes/discover.js';
 import { makeRequireSession } from './auth/middleware.js';
 import { startSessionPurgeTimer } from './auth/purge.js';
 import { ConnectionRepo } from './connections/repo.js';
@@ -91,6 +92,7 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   }));
 
   await registerConnectionRoutes(server, requireSession);
+  await registerDiscoverRoute(server, requireSession);
 
   const audit = new AuditRepo(db);
   const commandBus = new CommandBus(obsManager, audit);
