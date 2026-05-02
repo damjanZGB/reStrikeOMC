@@ -14,6 +14,9 @@ import { ConnectionRepo } from './connections/repo.js';
 import { registerConnectionRoutes } from './routes/connections.js';
 import { ConnectionManager } from './obs/connection-manager.js';
 import { WsHub } from './realtime/ws-hub.js';
+import { StateStore } from './state/state-store.js';
+import { EventCoalescer } from './state/event-coalescer.js';
+import { wireOBSToState } from './state/wire.js';
 
 export interface BuildOptions {
   test?: boolean;
@@ -85,9 +88,15 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
 
   await registerConnectionRoutes(server, requireSession);
 
-  const hub = new WsHub(server);
+  const stateStore = new StateStore();
+  const hub = new WsHub(server, stateStore);
   server.decorate('hub', hub);
+  const coalescer = new EventCoalescer((diff) => {
+    if (stateStore.applyDiff(diff)) hub.broadcastDiff(diff);
+  });
+  wireOBSToState(obsManager, stateStore, coalescer);
   server.addHook('onClose', async () => {
+    coalescer.destroy();
     hub.close();
   });
 
