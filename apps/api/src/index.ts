@@ -12,6 +12,7 @@ import { makeRequireSession } from './auth/middleware.js';
 import { startSessionPurgeTimer } from './auth/purge.js';
 import { ConnectionRepo } from './connections/repo.js';
 import { registerConnectionRoutes } from './routes/connections.js';
+import { ConnectionManager } from './obs/connection-manager.js';
 
 export interface BuildOptions {
   test?: boolean;
@@ -26,6 +27,7 @@ declare module 'fastify' {
     users: UserRepo;
     sessions: SessionRepo;
     passwordKey: Buffer;
+    obsManager: ConnectionManager;
   }
 }
 
@@ -52,16 +54,19 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   const sessions = new SessionRepo(db);
   const passwordKey = deriveKeyFromString(connectionPasswordKey);
   const connections = new ConnectionRepo(db, passwordKey);
+  const obsManager = new ConnectionManager();
 
   server.decorate('db', db);
   server.decorate('users', users);
   server.decorate('sessions', sessions);
   server.decorate('passwordKey', passwordKey);
   server.decorate('connections', connections);
+  server.decorate('obsManager', obsManager);
 
   const stopPurge = startSessionPurgeTimer(sessions);
   server.addHook('onClose', async () => {
     stopPurge();
+    await obsManager.closeAll();
     db.close();
   });
 

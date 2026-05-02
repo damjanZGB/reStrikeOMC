@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildTestServer } from '../test-helpers.js';
+import { startMockObs } from '../obs/mock-server.js';
 
 async function login(server: FastifyInstance): Promise<string> {
   await server.inject({
@@ -144,8 +145,9 @@ describe('connections routes — update + delete', () => {
   });
 });
 
-describe('connection test endpoint stub', () => {
-  it('returns not_implemented for now', async () => {
+describe('connection /test endpoint', () => {
+  it('returns ok for a reachable OBS', async () => {
+    const mock = await startMockObs({ password: null });
     const { server, close } = await buildTestServer();
     try {
       const cookie = await login(server);
@@ -153,7 +155,7 @@ describe('connection test endpoint stub', () => {
         method: 'POST',
         url: '/api/connections',
         headers: { cookie },
-        payload: { name: 'A', host: 'h', port: 4455 },
+        payload: { name: 'A', host: '127.0.0.1', port: mock.port },
       });
       const id = created.json().id as string;
       const r = await server.inject({
@@ -162,9 +164,35 @@ describe('connection test endpoint stub', () => {
         headers: { cookie },
       });
       expect(r.statusCode).toBe(200);
-      expect(r.json()).toEqual({ status: 'not_implemented' });
+      expect(r.json()).toMatchObject({ status: 'ok' });
     } finally {
       await close();
+      await mock.close();
+    }
+  });
+
+  it('returns auth_failed for wrong password', async () => {
+    const mock = await startMockObs({ password: 'real' });
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: { name: 'A', host: '127.0.0.1', port: mock.port, password: 'wrong' },
+      });
+      const id = created.json().id as string;
+      const r = await server.inject({
+        method: 'POST',
+        url: `/api/connections/${id}/test`,
+        headers: { cookie },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toMatchObject({ status: 'auth_failed' });
+    } finally {
+      await close();
+      await mock.close();
     }
   });
 });

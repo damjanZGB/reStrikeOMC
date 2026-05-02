@@ -1,5 +1,6 @@
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import { z } from 'zod';
+import { OBSWebSocket } from 'obs-websocket-js';
 import { ConnectionInputSchema } from '@restrike/shared';
 import { ConnectionRepo } from '../connections/repo.js';
 
@@ -50,10 +51,19 @@ export async function registerConnectionRoutes(
   server.post('/api/connections/:id/test', { preHandler: guard }, async (req, reply) => {
     const params = ConnectionParams.safeParse(req.params);
     if (!params.success) return reply.code(400).send({ error: 'invalid_id' });
-    if (!server.connections.findById(params.data.id)) {
-      return reply.code(404).send({ error: 'not_found' });
+    const conn = server.connections.findById(params.data.id);
+    if (!conn) return reply.code(404).send({ error: 'not_found' });
+    const password = server.connections.getPassword(params.data.id);
+    const obs = new OBSWebSocket();
+    try {
+      await obs.connect(`ws://${conn.host}:${conn.port}`, password ?? undefined);
+      await obs.disconnect();
+      return { status: 'ok' };
+    } catch (err) {
+      const code = (err as { code?: number }).code;
+      if (code === 4009) return { status: 'auth_failed' };
+      return { status: 'unreachable', message: String(err) };
     }
-    return { status: 'not_implemented' };
   });
 }
 
