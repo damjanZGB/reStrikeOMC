@@ -38,6 +38,27 @@ export type ConnectionManagerEvents = {
   snapshot: [SnapshotEvent];
 };
 
+const FORWARDED_EVENTS = [
+  'CurrentProgramSceneChanged',
+  'CurrentPreviewSceneChanged',
+  'StudioModeStateChanged',
+  'SceneListChanged',
+  'SceneItemEnableStateChanged',
+  'InputMuteStateChanged',
+  'InputVolumeChanged',
+  'InputAudioSyncOffsetChanged',
+  'InputCreated',
+  'InputRemoved',
+  'InputNameChanged',
+  'InputVolumeMeters',
+  'StreamStateChanged',
+  'RecordStateChanged',
+  'ReplayBufferStateChanged',
+  'VirtualcamStateChanged',
+  'CurrentSceneCollectionChanged',
+  'CurrentProfileChanged',
+] as const;
+
 export class ConnectionManager extends EventEmitter {
   private readonly slots = new Map<string, Slot>();
 
@@ -87,6 +108,13 @@ export class ConnectionManager extends EventEmitter {
       this.setStatus(slot, 'connected');
       void this.fetchSnapshot(slot);
     });
+
+    for (const ev of FORWARDED_EVENTS) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      slot.client.on(ev as any, (eventData: unknown) => {
+        this.emit('obsEvent', { connId: slot.target.id, eventType: ev, eventData });
+      });
+    }
   }
 
   private async fetchSnapshot(slot: Slot): Promise<void> {

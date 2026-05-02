@@ -77,6 +77,26 @@ describe('ConnectionManager — call', () => {
   });
 });
 
+describe('ConnectionManager — events', () => {
+  it('forwards CurrentProgramSceneChanged as obsEvent', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const seen: any[] = [];
+    mgr.on('obsEvent', (e) => seen.push(e));
+    await mgr.add({
+      id: '00000000-0000-0000-0000-000000000030',
+      host: '127.0.0.1',
+      port: mock.port,
+      password: null,
+    });
+    await mgr.waitForStatus('00000000-0000-0000-0000-000000000030', 'connected', 2000);
+    mock.changeProgramScene('Scene 2');
+    await new Promise((r) => setTimeout(r, 100));
+    const ev = seen.find((e) => e.eventType === 'CurrentProgramSceneChanged');
+    expect(ev).toBeDefined();
+    expect(ev.eventData.sceneName).toBe('Scene 2');
+  });
+});
+
 describe('ConnectionManager — initial sync', () => {
   it('emits a snapshot event with scenes and inputs after connect', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
