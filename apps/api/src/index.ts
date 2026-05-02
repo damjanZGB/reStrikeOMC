@@ -8,6 +8,7 @@ import { SessionRepo } from './auth/sessions.js';
 import { deriveKeyFromString } from './auth/crypto.js';
 import { registerSetupRoute } from './routes/setup.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { makeRequireSession } from './auth/middleware.js';
 
 export interface BuildOptions {
   test?: boolean;
@@ -61,6 +62,12 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
 
   await registerSetupRoute(server);
   await registerAuthRoutes(server);
+
+  const requireSession = makeRequireSession(server);
+  server.get('/api/me', { preHandler: requireSession }, async (req) => ({
+    id: req.user!.id,
+    username: req.user!.username,
+  }));
 
   return server;
 }
