@@ -10,6 +10,8 @@ import { registerSetupRoute } from './routes/setup.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { makeRequireSession } from './auth/middleware.js';
 import { startSessionPurgeTimer } from './auth/purge.js';
+import { ConnectionRepo } from './connections/repo.js';
+import { registerConnectionRoutes } from './routes/connections.js';
 
 export interface BuildOptions {
   test?: boolean;
@@ -49,11 +51,13 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   const users = new UserRepo(db);
   const sessions = new SessionRepo(db);
   const passwordKey = deriveKeyFromString(connectionPasswordKey);
+  const connections = new ConnectionRepo(db, passwordKey);
 
   server.decorate('db', db);
   server.decorate('users', users);
   server.decorate('sessions', sessions);
   server.decorate('passwordKey', passwordKey);
+  server.decorate('connections', connections);
 
   const stopPurge = startSessionPurgeTimer(sessions);
   server.addHook('onClose', async () => {
@@ -71,6 +75,8 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
     id: req.user!.id,
     username: req.user!.username,
   }));
+
+  await registerConnectionRoutes(server, requireSession);
 
   return server;
 }
