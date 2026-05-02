@@ -6,12 +6,18 @@ export interface MockOpts {
   password: string | null;
 }
 
+export interface ReceivedRequest {
+  requestType: string;
+  requestData: Record<string, unknown>;
+}
+
 export interface MockHandle {
   port: number;
   close: () => Promise<void>;
   changeProgramScene: (name: string) => void;
   setSceneList: (scenes: string[]) => void;
   setInputList: (inputs: Array<{ name: string; kind: string }>) => void;
+  receivedRequests: ReceivedRequest[];
 }
 
 interface ClientState {
@@ -58,6 +64,7 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
   let inputs: Array<{ name: string; kind: string }> = [
     { name: 'Mic', kind: 'wasapi_input_capture' },
   ];
+  const receivedRequests: ReceivedRequest[] = [];
 
   function send(ws: WebSocket, encoding: 'json' | 'msgpack', op: number, d: unknown): void {
     ws.send(encodeFrame(encoding, op, d));
@@ -73,6 +80,7 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
     if (!state.identified) return;
     if (msg.op === 6) {
       const { requestType, requestId, requestData } = msg.d;
+      receivedRequests.push({ requestType, requestData: requestData ?? {} });
       const reply = (
         status: { result: boolean; code?: number; comment?: string },
         responseData?: unknown
@@ -125,6 +133,33 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
             });
           }
           return;
+        }
+        case 'SetInputMute': {
+          const name = requestData?.inputName as string;
+          if (!inputs.find((i) => i.name === name)) {
+            return reply({ result: false, code: 601, comment: 'no such input' });
+          }
+          if (typeof requestData?.inputMuted !== 'boolean') {
+            return reply({ result: false, code: 402, comment: 'inputMuted must be boolean' });
+          }
+          return reply({ result: true, code: 100 });
+        }
+        case 'SetInputVolume': {
+          const name = requestData?.inputName as string;
+          if (!inputs.find((i) => i.name === name)) {
+            return reply({ result: false, code: 601, comment: 'no such input' });
+          }
+          if (
+            requestData?.inputVolumeMul === undefined &&
+            requestData?.inputVolumeDb === undefined
+          ) {
+            return reply({
+              result: false,
+              code: 402,
+              comment: 'inputVolumeMul or inputVolumeDb required',
+            });
+          }
+          return reply({ result: true, code: 100 });
         }
         default:
           return reply({ result: false, code: 204, comment: 'not implemented in mock' });
@@ -209,5 +244,6 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
     setInputList(i) {
       inputs = i;
     },
+    receivedRequests,
   };
 }

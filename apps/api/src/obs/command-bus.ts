@@ -30,6 +30,37 @@ const ACTION_TO_OBS: Record<CommandName, string> = {
   SetCurrentProfile: 'SetCurrentProfile',
 };
 
+/**
+ * Map our wire payload field names (terse, web-facing) to OBS Studio's expected
+ * field names. obs-websocket v5 prefixes most input/audio fields with `input...`.
+ * Commands without an entry pass through unchanged.
+ */
+type PayloadMap = (payload: Record<string, unknown>) => Record<string, unknown>;
+
+const PAYLOAD_TRANSLATORS: Partial<Record<CommandName, PayloadMap>> = {
+  SetStudioModeEnabled: (p) => ({ studioModeEnabled: p.enabled }),
+  SetCurrentSceneTransitionDuration: (p) => ({ transitionDuration: p.transitionDurationMs }),
+  SetInputMute: (p) => ({ inputName: p.inputName, inputMuted: p.muted }),
+  SetInputVolume: (p) => {
+    const out: Record<string, unknown> = { inputName: p.inputName };
+    if (p.volumeMul !== undefined) out.inputVolumeMul = p.volumeMul;
+    if (p.volumeDb !== undefined) out.inputVolumeDb = p.volumeDb;
+    return out;
+  },
+  SetInputAudioSyncOffset: (p) => ({
+    inputName: p.inputName,
+    inputAudioSyncOffset: p.syncOffsetMs,
+  }),
+};
+
+function translatePayload(
+  action: CommandName,
+  payload: Record<string, unknown>
+): Record<string, unknown> {
+  const translator = PAYLOAD_TRANSLATORS[action];
+  return translator ? translator(payload) : payload;
+}
+
 export interface DispatchInput {
   userId: string;
   action: string;
@@ -68,11 +99,13 @@ export class CommandBus {
       throw new Error('invalid_payload: ' + JSON.stringify(parsed.error.issues));
     }
     const obsRequest = ACTION_TO_OBS[input.action];
+    const obsPayload = translatePayload(
+      input.action,
+      parsed.data as Record<string, unknown>
+    );
 
     const settled = await Promise.allSettled(
-      input.targets.map((t) =>
-        this.mgr.call(t, obsRequest, parsed.data as Record<string, unknown>)
-      )
+      input.targets.map((t) => this.mgr.call(t, obsRequest, obsPayload))
     );
 
     const ok: string[] = [];

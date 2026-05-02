@@ -82,4 +82,42 @@ describe('CommandBus', () => {
       })
     ).rejects.toThrow(/invalid_payload/);
   });
+
+  it('translates SetInputMute payload to OBS field names', async () => {
+    const id = '00000000-0000-0000-0000-000000000064';
+    await mgr.add({ id, host: '127.0.0.1', port: mock.port, password: null });
+    await mgr.waitForStatus(id, 'connected', 2000);
+
+    const result = await bus.dispatch({
+      userId,
+      action: 'SetInputMute',
+      targets: [id],
+      payload: { inputName: 'Mic', muted: true },
+    });
+
+    expect(result.ok).toEqual([id]);
+    expect(result.failed).toEqual([]);
+
+    const muteReq = mock.receivedRequests.find((r) => r.requestType === 'SetInputMute');
+    expect(muteReq).toBeDefined();
+    // Wire field name on the OBS side must be `inputMuted`, not our schema's `muted`
+    expect(muteReq!.requestData).toEqual({ inputName: 'Mic', inputMuted: true });
+  });
+
+  it('translates SetInputVolume payload (mul) to OBS field names', async () => {
+    const id = '00000000-0000-0000-0000-000000000065';
+    await mgr.add({ id, host: '127.0.0.1', port: mock.port, password: null });
+    await mgr.waitForStatus(id, 'connected', 2000);
+
+    const result = await bus.dispatch({
+      userId,
+      action: 'SetInputVolume',
+      targets: [id],
+      payload: { inputName: 'Mic', volumeMul: 0.5 },
+    });
+
+    expect(result.ok).toEqual([id]);
+    const volReq = mock.receivedRequests.find((r) => r.requestType === 'SetInputVolume');
+    expect(volReq!.requestData).toEqual({ inputName: 'Mic', inputVolumeMul: 0.5 });
+  });
 });
