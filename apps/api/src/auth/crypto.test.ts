@@ -22,7 +22,8 @@ describe('crypto utils', () => {
   it('rejects tampered ciphertext', () => {
     const key = deriveKeyFromString(KEY_STRING);
     const { ciphertext, iv } = encrypt(key, 'x');
-    ciphertext[0] = ciphertext[0] === 0 ? 1 : ciphertext[0] ^ 1;
+    const byte = ciphertext[0]!;
+    ciphertext[0] = byte === 0 ? 1 : byte ^ 1;
     expect(() => decrypt(key, ciphertext, iv)).toThrow();
   });
 });

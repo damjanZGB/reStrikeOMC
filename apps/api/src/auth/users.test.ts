@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,11 @@ beforeEach(() => {
   db = openDb(join(dir, 'test.db'));
   runMigrations(db);
   users = new UserRepo(db);
+});
+
+afterEach(() => {
+  db?.close();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 describe('UserRepo', () => {

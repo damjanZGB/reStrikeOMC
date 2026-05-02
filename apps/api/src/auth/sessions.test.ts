@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +19,11 @@ beforeEach(async () => {
   users = new UserRepo(db);
   sessions = new SessionRepo(db);
   userId = (await users.create('alice', 'pw')).id;
+});
+
+afterEach(() => {
+  db?.close();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 describe('SessionRepo', () => {
