@@ -43,3 +43,27 @@ describe('ConnectionManager — lifecycle', () => {
     expect(mgr.getStatus('00000000-0000-0000-0000-000000000002')).toBe('auth_failed');
   });
 });
+
+describe('ConnectionManager — initial sync', () => {
+  it('emits a snapshot event with scenes and inputs after connect', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const events: any[] = [];
+    mgr.on('snapshot', (e) => events.push(e));
+    mock.setSceneList(['A', 'B']);
+    mock.setInputList([{ name: 'Mic', kind: 'wasapi_input_capture' }]);
+    await mgr.add({
+      id: '00000000-0000-0000-0000-000000000010',
+      host: '127.0.0.1',
+      port: mock.port,
+      password: null,
+    });
+    await mgr.waitForStatus('00000000-0000-0000-0000-000000000010', 'connected', 2000);
+    await new Promise((r) => setTimeout(r, 100));
+    const snap = events.find((e) => e.connId === '00000000-0000-0000-0000-000000000010');
+    expect(snap).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(snap.scenes.map((s: any) => s.name)).toEqual(['A', 'B']);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(snap.inputs.map((i: any) => i.name)).toEqual(['Mic']);
+  });
+});

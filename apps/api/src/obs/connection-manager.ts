@@ -24,9 +24,18 @@ export interface StatusEvent {
   reason?: string;
 }
 
+export interface SnapshotEvent {
+  connId: string;
+  currentProgramScene: string | null;
+  currentPreviewScene: string | null;
+  scenes: Array<{ name: string; index: number }>;
+  inputs: Array<{ name: string; kind: string }>;
+}
+
 export type ConnectionManagerEvents = {
   status: [StatusEvent];
   obsEvent: [{ connId: string; eventType: string; eventData: unknown }];
+  snapshot: [SnapshotEvent];
 };
 
 export class ConnectionManager extends EventEmitter {
@@ -76,7 +85,34 @@ export class ConnectionManager extends EventEmitter {
     slot.client.on('Identified', () => {
       slot.reconnectAttempt = 0;
       this.setStatus(slot, 'connected');
+      void this.fetchSnapshot(slot);
     });
+  }
+
+  private async fetchSnapshot(slot: Slot): Promise<void> {
+    try {
+      const [sceneList, inputList] = await Promise.all([
+        slot.client.call('GetSceneList'),
+        slot.client.call('GetInputList'),
+      ]);
+      this.emit('snapshot', {
+        connId: slot.target.id,
+        currentProgramScene: sceneList.currentProgramSceneName ?? null,
+        currentPreviewScene: sceneList.currentPreviewSceneName ?? null,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        scenes: sceneList.scenes.map((s: any) => ({
+          name: String(s.sceneName),
+          index: Number(s.sceneIndex),
+        })),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        inputs: inputList.inputs.map((i: any) => ({
+          name: String(i.inputName),
+          kind: String(i.inputKind),
+        })),
+      });
+    } catch {
+      // snapshot fetch errors are non-fatal — coalescer will retry on next event
+    }
   }
 
   private async openOnce(slot: Slot): Promise<void> {
