@@ -17,3 +17,24 @@ describe('WS Hub broadcast', () => {
     }
   }, 10000);
 });
+
+describe('WS Hub sync', () => {
+  it('responds to {type:"sync"} with a fresh snapshot', async () => {
+    const { server, close } = await buildTestServer();
+    try {
+      const sock = await setupAuthedSocket(server);
+      // consume initial snapshot
+      await sock.waitForMessage();
+      sock.ws.send(JSON.stringify({ type: 'sync' }));
+      const msg = await sock.waitForMessage(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (m) => (m as any)?.type === 'state.snapshot'
+      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((msg as any).type).toBe('state.snapshot');
+      await sock.close();
+    } finally {
+      await close();
+    }
+  }, 10000);
+});
