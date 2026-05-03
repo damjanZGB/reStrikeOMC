@@ -33,10 +33,27 @@ export const useWsStore = create<WsState>((set) => ({
     set((prev) => {
       const current = prev.states[diff.connId];
       if (!current) return prev;
+      // Mirror the server-side StateStore: outputs is a struct of four
+      // independent sub-states. Per-key nullish-coalesce so an absent or
+      // explicitly-undefined sub-key keeps the current value.
+      const mergedOutputs: InstanceState['outputs'] = diff.outputs
+        ? {
+            streaming: diff.outputs.streaming ?? current.outputs.streaming,
+            recording: diff.outputs.recording ?? current.outputs.recording,
+            replayBuffer: diff.outputs.replayBuffer ?? current.outputs.replayBuffer,
+            virtualCam: diff.outputs.virtualCam ?? current.outputs.virtualCam,
+          }
+        : current.outputs;
+      const merged: InstanceState = {
+        ...current,
+        ...diff,
+        connId: diff.connId,
+        outputs: mergedOutputs,
+      };
       return {
         states: {
           ...prev.states,
-          [diff.connId]: { ...current, ...diff, connId: diff.connId },
+          [diff.connId]: merged,
         },
       };
     }),

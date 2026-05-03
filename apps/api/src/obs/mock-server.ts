@@ -11,12 +11,21 @@ export interface ReceivedRequest {
   requestData: Record<string, unknown>;
 }
 
+export interface OutputState {
+  streaming: boolean;
+  recording: boolean;
+  recordingPaused: boolean;
+  replayBuffer: boolean;
+  virtualCam: boolean;
+}
+
 export interface MockHandle {
   port: number;
   close: () => Promise<void>;
   changeProgramScene: (name: string) => void;
   setSceneList: (scenes: string[]) => void;
   setInputList: (inputs: Array<{ name: string; kind: string }>) => void;
+  setOutputs: (patch: Partial<OutputState>) => void;
   receivedRequests: ReceivedRequest[];
 }
 
@@ -64,6 +73,13 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
   let inputs: Array<{ name: string; kind: string }> = [
     { name: 'Mic', kind: 'wasapi_input_capture' },
   ];
+  let outputs: OutputState = {
+    streaming: false,
+    recording: false,
+    recordingPaused: false,
+    replayBuffer: false,
+    virtualCam: false,
+  };
   const receivedRequests: ReceivedRequest[] = [];
 
   function send(ws: WebSocket, encoding: 'json' | 'msgpack', op: number, d: unknown): void {
@@ -161,6 +177,35 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
           }
           return reply({ result: true, code: 100 });
         }
+        case 'GetStreamStatus':
+          return reply(
+            { result: true, code: 100 },
+            {
+              outputActive: outputs.streaming,
+              outputReconnecting: false,
+              outputTimecode: '00:00:00.000',
+              outputDuration: 0,
+              outputCongestion: 0,
+              outputBytes: 0,
+              outputSkippedFrames: 0,
+              outputTotalFrames: 0,
+            }
+          );
+        case 'GetRecordStatus':
+          return reply(
+            { result: true, code: 100 },
+            {
+              outputActive: outputs.recording,
+              outputPaused: outputs.recordingPaused,
+              outputTimecode: '00:00:00.000',
+              outputDuration: 0,
+              outputBytes: 0,
+            }
+          );
+        case 'GetReplayBufferStatus':
+          return reply({ result: true, code: 100 }, { outputActive: outputs.replayBuffer });
+        case 'GetVirtualCamStatus':
+          return reply({ result: true, code: 100 }, { outputActive: outputs.virtualCam });
         default:
           return reply({ result: false, code: 204, comment: 'not implemented in mock' });
       }
@@ -243,6 +288,9 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
     },
     setInputList(i) {
       inputs = i;
+    },
+    setOutputs(patch) {
+      outputs = { ...outputs, ...patch };
     },
     receivedRequests,
   };

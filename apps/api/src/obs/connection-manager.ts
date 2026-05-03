@@ -24,12 +24,20 @@ export interface StatusEvent {
   reason?: string;
 }
 
+export interface OutputSnapshot {
+  streaming: { active: boolean; durationMs: number };
+  recording: { active: boolean; paused: boolean; durationMs: number };
+  replayBuffer: { active: boolean };
+  virtualCam: { active: boolean };
+}
+
 export interface SnapshotEvent {
   connId: string;
   currentProgramScene: string | null;
   currentPreviewScene: string | null;
   scenes: Array<{ name: string; index: number }>;
   inputs: Array<{ name: string; kind: string }>;
+  outputs: OutputSnapshot;
 }
 
 export type ConnectionManagerEvents = {
@@ -118,29 +126,64 @@ export class ConnectionManager extends EventEmitter {
   }
 
   private async fetchSnapshot(slot: Slot): Promise<void> {
-    try {
-      const [sceneList, inputList] = await Promise.all([
-        slot.client.call('GetSceneList'),
-        slot.client.call('GetInputList'),
-      ]);
-      this.emit('snapshot', {
-        connId: slot.target.id,
-        currentProgramScene: sceneList.currentProgramSceneName ?? null,
-        currentPreviewScene: sceneList.currentPreviewSceneName ?? null,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        scenes: sceneList.scenes.map((s: any) => ({
-          name: String(s.sceneName),
-          index: Number(s.sceneIndex),
-        })),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        inputs: inputList.inputs.map((i: any) => ({
-          name: String(i.inputName),
-          kind: String(i.inputKind),
-        })),
-      });
-    } catch {
-      // snapshot fetch errors are non-fatal — coalescer will retry on next event
+    // Each call is independent — Promise.allSettled so a single missing/rejected
+    // endpoint (e.g. an older OBS that doesn't expose GetVirtualCamStatus) does
+    // not nuke the entire snapshot. Without this, *all* output statuses default
+    // to off forever even though OBS may already be streaming/recording. Six
+    // requests in parallel; we synthesize defaults for whatever didn't return.
+    const [scene, input, stream, record, replay, virt] = await Promise.allSettled([
+      slot.client.call('GetSceneList'),
+      slot.client.call('GetInputList'),
+      slot.client.call('GetStreamStatus'),
+      slot.client.call('GetRecordStatus'),
+      slot.client.call('GetReplayBufferStatus'),
+      slot.client.call('GetVirtualCamStatus'),
+    ]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ok = <T,>(s: PromiseSettledResult<T>): T | null =>
+      s.status === 'fulfilled' ? s.value : null;
+
+    const sceneList = ok(scene);
+    const inputList = ok(input);
+    const streamStatus = ok(stream);
+    const recordStatus = ok(record);
+    const replayStatus = ok(replay);
+    const virtStatus = ok(virt);
+
+    if (!sceneList && !inputList && !streamStatus && !recordStatus && !replayStatus && !virtStatus) {
+      // All six failed — almost certainly not connected; nothing useful to emit.
+      return;
     }
+
+    this.emit('snapshot', {
+      connId: slot.target.id,
+      currentProgramScene: sceneList?.currentProgramSceneName ?? null,
+      currentPreviewScene: sceneList?.currentPreviewSceneName ?? null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      scenes: (sceneList?.scenes ?? []).map((s: any) => ({
+        name: String(s.sceneName),
+        index: Number(s.sceneIndex),
+      })),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      inputs: (inputList?.inputs ?? []).map((i: any) => ({
+        name: String(i.inputName),
+        kind: String(i.inputKind),
+      })),
+      outputs: {
+        streaming: {
+          active: !!streamStatus?.outputActive,
+          durationMs: Number(streamStatus?.outputDuration ?? 0),
+        },
+        recording: {
+          active: !!recordStatus?.outputActive,
+          paused: !!recordStatus?.outputPaused,
+          durationMs: Number(recordStatus?.outputDuration ?? 0),
+        },
+        replayBuffer: { active: !!replayStatus?.outputActive },
+        virtualCam: { active: !!virtStatus?.outputActive },
+      },
+    });
   }
 
   private async openOnce(slot: Slot): Promise<void> {

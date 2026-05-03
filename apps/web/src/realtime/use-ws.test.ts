@@ -74,4 +74,26 @@ describe('useWsStore', () => {
     expect(after?.currentProgramScene).toBe('B');
     expect(after?.scenes).toEqual([{ name: 'A', index: 0 }]);
   });
+
+  it('deep-merges partial outputs (regression: stream toggle clobbered record)', () => {
+    const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    useWsStore.getState().applySnapshot([
+      makeState(id, {
+        outputs: {
+          streaming: { active: true, durationMs: 0 },
+          recording: { active: true, paused: false, durationMs: 0 },
+          replayBuffer: { active: false },
+          virtualCam: { active: false },
+        },
+      }),
+    ]);
+    // Diff carrying ONLY streaming — recording must be preserved.
+    useWsStore.getState().applyDiff({
+      connId: id,
+      outputs: { streaming: { active: false, durationMs: 0 } },
+    });
+    const after = useWsStore.getState().states[id]!;
+    expect(after.outputs.streaming.active).toBe(false);
+    expect(after.outputs.recording.active).toBe(true); // <-- regression test
+  });
 });

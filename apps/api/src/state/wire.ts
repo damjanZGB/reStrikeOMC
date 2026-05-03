@@ -26,6 +26,7 @@ export function wireOBSToState(
         syncOffsetMs: 0,
         levels: [],
       })),
+      outputs: snap.outputs,
     });
   });
   mgr.on('obsEvent', (e) => coalescer.handle(e.connId, e.eventType, e.eventData));

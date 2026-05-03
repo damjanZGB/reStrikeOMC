@@ -94,26 +94,28 @@ export class EventCoalescer {
       case 'StreamStateChanged':
         return {
           connId,
-          outputs: {
-            streaming: { active: !!ev.outputActive, durationMs: 0 },
-            recording: { active: false, paused: false, durationMs: 0 },
-            replayBuffer: { active: false },
-            virtualCam: { active: false },
-          },
+          outputs: { streaming: { active: !!ev.outputActive, durationMs: 0 } },
         };
       case 'RecordStateChanged':
         return {
           connId,
           outputs: {
-            streaming: { active: false, durationMs: 0 },
             recording: {
               active: !!ev.outputActive,
               paused: !!ev.outputPaused,
               durationMs: 0,
             },
-            replayBuffer: { active: false },
-            virtualCam: { active: false },
           },
+        };
+      case 'ReplayBufferStateChanged':
+        return {
+          connId,
+          outputs: { replayBuffer: { active: !!ev.outputActive } },
+        };
+      case 'VirtualcamStateChanged':
+        return {
+          connId,
+          outputs: { virtualCam: { active: !!ev.outputActive } },
         };
       default:
         return null;

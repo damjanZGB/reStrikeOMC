@@ -32,19 +32,38 @@ export const InputStateSchema = z.object({
 });
 export type InputState = z.infer<typeof InputStateSchema>;
 
-export const OutputSnapshotSchema = z.object({
-  streaming: z.object({
-    active: z.boolean(),
-    durationMs: z.number().int().nonnegative(),
-  }),
-  recording: z.object({
-    active: z.boolean(),
-    paused: z.boolean(),
-    durationMs: z.number().int().nonnegative(),
-  }),
-  replayBuffer: z.object({ active: z.boolean() }),
-  virtualCam: z.object({ active: z.boolean() }),
+const StreamingOutputSchema = z.object({
+  active: z.boolean(),
+  durationMs: z.number().int().nonnegative(),
 });
+const RecordingOutputSchema = z.object({
+  active: z.boolean(),
+  paused: z.boolean(),
+  durationMs: z.number().int().nonnegative(),
+});
+const ReplayBufferOutputSchema = z.object({ active: z.boolean() });
+const VirtualCamOutputSchema = z.object({ active: z.boolean() });
+
+export const OutputSnapshotSchema = z.object({
+  streaming: StreamingOutputSchema,
+  recording: RecordingOutputSchema,
+  replayBuffer: ReplayBufferOutputSchema,
+  virtualCam: VirtualCamOutputSchema,
+});
+
+/**
+ * Diffs may carry a partial outputs payload — e.g. only `streaming` if a
+ * StreamStateChanged event arrived. The StateStore (and the web client's
+ * mirror) deep-merge into the existing four-key struct so a stream toggle
+ * does not clobber the recording/replay/virtualcam siblings.
+ */
+export const OutputSnapshotPartialSchema = z.object({
+  streaming: StreamingOutputSchema.optional(),
+  recording: RecordingOutputSchema.optional(),
+  replayBuffer: ReplayBufferOutputSchema.optional(),
+  virtualCam: VirtualCamOutputSchema.optional(),
+});
+export type OutputSnapshotPartial = z.infer<typeof OutputSnapshotPartialSchema>;
 
 export const StatsSchema = z.object({
   fps: z.number().nonnegative(),
@@ -68,5 +87,9 @@ export type InstanceState = z.infer<typeof InstanceStateSchema>;
 
 export const InstanceStateDiffSchema = InstanceStateSchema.partial().extend({
   connId: z.string().uuid(),
+  // Override the inherited (.partial()) outputs with the per-key partial form
+  // so producers can emit just `outputs: { streaming: {...} }` without having
+  // to also send synthetic defaults for recording/replay/virtualcam.
+  outputs: OutputSnapshotPartialSchema.optional(),
 });
 export type InstanceStateDiff = z.infer<typeof InstanceStateDiffSchema>;

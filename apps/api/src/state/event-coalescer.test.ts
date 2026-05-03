@@ -40,4 +40,31 @@ describe('EventCoalescer', () => {
     vi.advanceTimersByTime(1000);
     expect(flush).not.toHaveBeenCalled();
   });
+
+  it('emits only the changed output sub-key (no sibling clobber)', () => {
+    const flush = vi.fn();
+    const c = new EventCoalescer(flush);
+    c.handle(ID, 'StreamStateChanged', { outputActive: true });
+    expect(flush).toHaveBeenCalledTimes(1);
+    const diff = flush.mock.calls[0]![0];
+    expect(diff.connId).toBe(ID);
+    expect(diff.outputs).toEqual({ streaming: { active: true, durationMs: 0 } });
+    // recording / replayBuffer / virtualCam must be ABSENT from the diff
+    expect(diff.outputs.recording).toBeUndefined();
+    expect(diff.outputs.replayBuffer).toBeUndefined();
+    expect(diff.outputs.virtualCam).toBeUndefined();
+  });
+
+  it.each([
+    ['RecordStateChanged', { outputActive: true, outputPaused: false }, 'recording'],
+    ['ReplayBufferStateChanged', { outputActive: true }, 'replayBuffer'],
+    ['VirtualcamStateChanged', { outputActive: true }, 'virtualCam'],
+  ] as const)('translates %s into a partial outputs diff', (event, payload, key) => {
+    const flush = vi.fn();
+    const c = new EventCoalescer(flush);
+    c.handle(ID, event, payload);
+    const diff = flush.mock.calls[0]![0];
+    expect(diff.outputs).toBeDefined();
+    expect(Object.keys(diff.outputs)).toEqual([key]);
+  });
 });

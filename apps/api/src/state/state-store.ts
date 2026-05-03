@@ -1,4 +1,23 @@
-import type { InstanceState, InstanceStateDiff } from '@restrike/shared';
+import type {
+  InstanceState,
+  InstanceStateDiff,
+  OutputSnapshotPartial,
+} from '@restrike/shared';
+
+function mergeOutputs(
+  current: InstanceState['outputs'],
+  partial: OutputSnapshotPartial
+): InstanceState['outputs'] {
+  // Per-key nullish-coalesce: an absent OR explicitly-undefined sub-key
+  // keeps the current value, which prevents a single output event (e.g.
+  // StreamStateChanged) from clobbering its three siblings to defaults.
+  return {
+    streaming: partial.streaming ?? current.streaming,
+    recording: partial.recording ?? current.recording,
+    replayBuffer: partial.replayBuffer ?? current.replayBuffer,
+    virtualCam: partial.virtualCam ?? current.virtualCam,
+  };
+}
 
 function defaultState(connId: string): InstanceState {
   return {
@@ -31,7 +50,14 @@ export class StateStore {
   applyDiff(diff: InstanceStateDiff): InstanceState | null {
     const current = this.states.get(diff.connId);
     if (!current) return null;
-    const merged: InstanceState = { ...current, ...diff, connId: current.connId };
+    // Most diff fields shallow-overwrite. `outputs` is the exception — see
+    // mergeOutputs for why a per-key merge matters.
+    const merged: InstanceState = {
+      ...current,
+      ...diff,
+      connId: current.connId,
+      outputs: diff.outputs ? mergeOutputs(current.outputs, diff.outputs) : current.outputs,
+    };
     this.states.set(diff.connId, merged);
     return merged;
   }

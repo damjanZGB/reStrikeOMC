@@ -114,6 +114,31 @@ describe('ConnectionManager — events', () => {
 });
 
 describe('ConnectionManager — initial sync', () => {
+  it('captures live stream/record state on connect (regression: was always off)', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const events: any[] = [];
+    mgr.on('snapshot', (e) => events.push(e));
+    // Pretend OBS was already streaming + had replay buffer running BEFORE
+    // we connected. fetchSnapshot must observe this state via
+    // GetStreamStatus / GetReplayBufferStatus, not via state-change events
+    // (which only fire on transitions, never on the initial connect).
+    mock.setOutputs({ streaming: true, replayBuffer: true });
+    await mgr.add({
+      id: '00000000-0000-0000-0000-000000000019',
+      host: '127.0.0.1',
+      port: mock.port,
+      password: null,
+    });
+    await mgr.waitForStatus('00000000-0000-0000-0000-000000000019', 'connected', 2000);
+    await new Promise((r) => setTimeout(r, 100));
+    const snap = events.find((e) => e.connId === '00000000-0000-0000-0000-000000000019');
+    expect(snap).toBeDefined();
+    expect(snap.outputs.streaming.active).toBe(true);
+    expect(snap.outputs.recording.active).toBe(false);
+    expect(snap.outputs.replayBuffer.active).toBe(true);
+    expect(snap.outputs.virtualCam.active).toBe(false);
+  });
+
   it('emits a snapshot event with scenes and inputs after connect', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const events: any[] = [];
