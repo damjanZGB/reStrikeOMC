@@ -1,6 +1,9 @@
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
+import fastifyStatic from '@fastify/static';
 import type { Db } from './db/sqlite.js';
 import { openDb, runMigrations } from './db/sqlite.js';
 import { UserRepo } from './auth/users.js';
@@ -94,6 +97,21 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   await registerConnectionRoutes(server, requireSession);
   await registerDiscoverRoute(server, requireSession);
 
+  const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');
+  if (existsSync(webDir)) {
+    await server.register(fastifyStatic, {
+      root: webDir,
+      prefix: '/',
+      decorateReply: false,
+    });
+    server.setNotFoundHandler((req, reply) => {
+      if (req.url.startsWith('/api') || req.url.startsWith('/ws')) {
+        return reply.code(404).send({ error: 'not_found' });
+      }
+      return reply.sendFile('index.html', webDir);
+    });
+  }
+
   const audit = new AuditRepo(db);
   const commandBus = new CommandBus(obsManager, audit);
   server.decorate('audit', audit);
@@ -114,7 +132,7 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   return server;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const port = Number(process.env.PORT ?? 8080);
   const host = process.env.HOST ?? '0.0.0.0';
   const server = await buildServer();
