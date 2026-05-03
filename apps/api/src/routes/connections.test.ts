@@ -145,6 +145,125 @@ describe('connections routes — update + delete', () => {
   });
 });
 
+describe('connection lifecycle — manager hydration', () => {
+  it('opens the live socket immediately after POST /api/connections', async () => {
+    const mock = await startMockObs({ password: null });
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: { name: 'Live', host: '127.0.0.1', port: mock.port },
+      });
+      const id = created.json().id as string;
+      // The manager should reach 'connected' without anyone calling .add() manually
+      await server.obsManager.waitForStatus(id, 'connected', 3000);
+      expect(server.obsManager.getStatus(id)).toBe('connected');
+    } finally {
+      await close();
+      await mock.close();
+    }
+  }, 10000);
+
+  it('retargets the live socket when PATCH changes host/port', async () => {
+    const mockA = await startMockObs({ password: null });
+    const mockB = await startMockObs({ password: null });
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: { name: 'X', host: '127.0.0.1', port: mockA.port },
+      });
+      const id = created.json().id as string;
+      await server.obsManager.waitForStatus(id, 'connected', 3000);
+
+      // Move the connection to mockB; the manager should reconnect there.
+      await mockA.close();
+      await server.inject({
+        method: 'PATCH',
+        url: `/api/connections/${id}`,
+        headers: { cookie },
+        payload: { port: mockB.port },
+      });
+      await server.obsManager.waitForStatus(id, 'connected', 5000);
+      expect(server.obsManager.getStatus(id)).toBe('connected');
+    } finally {
+      await close();
+      await mockB.close();
+    }
+  }, 15000);
+
+  it('removes the live socket on DELETE', async () => {
+    const mock = await startMockObs({ password: null });
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: { name: 'D', host: '127.0.0.1', port: mock.port },
+      });
+      const id = created.json().id as string;
+      await server.obsManager.waitForStatus(id, 'connected', 3000);
+
+      const r = await server.inject({
+        method: 'DELETE',
+        url: `/api/connections/${id}`,
+        headers: { cookie },
+      });
+      expect(r.statusCode).toBe(204);
+      // After remove the manager has no slot for this id
+      expect(server.obsManager.getStatus(id)).toBe(null);
+    } finally {
+      await close();
+      await mock.close();
+    }
+  }, 10000);
+
+  it('PATCH name-only does not retarget the live socket (no churn)', async () => {
+    const mock = await startMockObs({ password: null });
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: { name: 'orig', host: '127.0.0.1', port: mock.port },
+      });
+      const id = created.json().id as string;
+      await server.obsManager.waitForStatus(id, 'connected', 3000);
+
+      // Capture status events; a rename should not produce any new transitions.
+      const statusEvents: string[] = [];
+      server.obsManager.on('status', (e) => {
+        if (e.connId === id) statusEvents.push(e.status);
+      });
+
+      await server.inject({
+        method: 'PATCH',
+        url: `/api/connections/${id}`,
+        headers: { cookie },
+        payload: { name: 'renamed' },
+      });
+      await new Promise((r) => setTimeout(r, 200));
+
+      // Still connected, no churn
+      expect(server.obsManager.getStatus(id)).toBe('connected');
+      expect(statusEvents).toEqual([]);
+    } finally {
+      await close();
+      await mock.close();
+    }
+  }, 10000);
+});
+
 describe('connection /test endpoint', () => {
   it('returns ok for a reachable OBS', async () => {
     const mock = await startMockObs({ password: null });

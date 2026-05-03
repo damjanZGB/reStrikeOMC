@@ -4,6 +4,7 @@ import type { ConnectionConfig, ConnectionInput } from '@restrike/shared';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -15,31 +16,62 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Trash2, Wifi, Radar } from 'lucide-react';
+import { Trash2, Wifi, Radar, Pencil } from 'lucide-react';
 
-interface FormState {
+interface AddFormState {
   name: string;
   host: string;
   port: string;
   password: string;
 }
 
-const empty: FormState = { name: '', host: '', port: '4455', password: '' };
+const emptyAdd: AddFormState = { name: '', host: '', port: '4455', password: '' };
+
+interface EditFormState {
+  name: string;
+  host: string;
+  port: string;
+  password: string;
+  clearPassword: boolean;
+}
+
+function toEditForm(c: ConnectionConfig): EditFormState {
+  return {
+    name: c.name,
+    host: c.host,
+    port: String(c.port),
+    password: '',
+    clearPassword: false,
+  };
+}
 
 export function ConnectionsPage(): JSX.Element {
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<FormState>(empty);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState<AddFormState>(emptyAdd);
+  const [editing, setEditing] = useState<ConnectionConfig | null>(null);
+  const [editForm, setEditForm] = useState<EditFormState | null>(null);
   const [testStatus, setTestStatus] = useState<Record<string, string>>({});
   const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [discoverPort, setDiscoverPort] = useState<string>('4455');
 
   const list = useQuery({ queryKey: ['connections'], queryFn: api.listConnections });
 
   const create = useMutation({
     mutationFn: (input: ConnectionInput) => api.createConnection(input),
     onSuccess: async () => {
-      setOpen(false);
-      setForm(empty);
+      setAddOpen(false);
+      setAddForm(emptyAdd);
+      await qc.invalidateQueries({ queryKey: ['connections'] });
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<ConnectionInput> }) =>
+      api.updateConnection(id, patch),
+    onSuccess: async () => {
+      setEditing(null);
+      setEditForm(null);
       await qc.invalidateQueries({ queryKey: ['connections'] });
     },
   });
@@ -58,7 +90,7 @@ export function ConnectionsPage(): JSX.Element {
   });
 
   const discover = useMutation({
-    mutationFn: () => api.discover(4455),
+    mutationFn: (port: number) => api.discover(port),
   });
 
   return (
@@ -70,7 +102,9 @@ export function ConnectionsPage(): JSX.Element {
             open={discoverOpen}
             onOpenChange={(v) => {
               setDiscoverOpen(v);
-              if (v && !discover.data) discover.mutate();
+              if (v && !discover.data) {
+                discover.mutate(Number(discoverPort) || 4455);
+              }
             }}
           >
             <DialogTrigger asChild>
@@ -83,22 +117,46 @@ export function ConnectionsPage(): JSX.Element {
               <DialogHeader>
                 <DialogTitle>Discover OBS instances</DialogTitle>
                 <DialogDescription>
-                  Scans your local subnet for hosts responding on port 4455. May take a few seconds.
+                  Scans your local subnet for hosts responding on the given port.
+                  Defaults to OBS-WebSocket's standard 4455 — change it if your
+                  instances use a different port.
                 </DialogDescription>
               </DialogHeader>
+              <div className="grid gap-2">
+                <Label htmlFor="discover-port">Port</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="discover-port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={discoverPort}
+                    onChange={(e) => setDiscoverPort(e.target.value)}
+                  />
+                  <Button
+                    onClick={() => discover.mutate(Number(discoverPort) || 4455)}
+                    disabled={discover.isPending}
+                  >
+                    {discover.isPending ? 'Scanning...' : 'Scan'}
+                  </Button>
+                </div>
+              </div>
               {discover.isPending ? (
-                <p className="text-sm text-muted-foreground">Scanning...</p>
+                <p className="text-sm text-muted-foreground">
+                  Probing 254 hosts in parallel — this typically takes 2-5 seconds.
+                </p>
               ) : discover.isError ? (
                 <p className="text-sm text-destructive">
                   {(discover.error as Error).message}
                 </p>
               ) : discover.data && discover.data.hosts.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No hosts responded. Make sure obs-websocket is enabled and reachable.
+                  No hosts responded on port {discoverPort}. Make sure
+                  obs-websocket is enabled and reachable, or try a different port.
                 </p>
-              ) : (
+              ) : discover.data ? (
                 <ul className="grid gap-2">
-                  {discover.data?.hosts.map((h) => (
+                  {discover.data.hosts.map((h) => (
                     <li
                       key={`${h.host}:${h.port}`}
                       className="flex items-center justify-between border rounded-md px-3 py-2"
@@ -109,14 +167,14 @@ export function ConnectionsPage(): JSX.Element {
                       <Button
                         size="sm"
                         onClick={() => {
-                          setForm({
+                          setAddForm({
                             name: `OBS @ ${h.host}`,
                             host: h.host,
                             port: String(h.port),
                             password: '',
                           });
                           setDiscoverOpen(false);
-                          setOpen(true);
+                          setAddOpen(true);
                         }}
                       >
                         Add
@@ -124,92 +182,90 @@ export function ConnectionsPage(): JSX.Element {
                     </li>
                   ))}
                 </ul>
-              )}
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => discover.mutate()}
-                  disabled={discover.isPending}
-                >
-                  {discover.isPending ? 'Scanning...' : 'Re-scan'}
-                </Button>
-              </DialogFooter>
+              ) : null}
             </DialogContent>
           </Dialog>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button>Add connection</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add OBS connection</DialogTitle>
-              <DialogDescription>Reach an OBS instance over the LAN.</DialogDescription>
-            </DialogHeader>
-            <form
-              className="grid gap-4"
-              onSubmit={(e) => {
-                e.preventDefault();
-                create.mutate({
-                  name: form.name,
-                  host: form.host,
-                  port: Number(form.port),
-                  password: form.password || undefined,
-                });
-              }}
-            >
-              <div className="grid gap-2">
-                <Label htmlFor="conn-name">Name</Label>
-                <Input
-                  id="conn-name"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="conn-host">Host</Label>
-                <Input
-                  id="conn-host"
-                  placeholder="192.168.1.50"
-                  value={form.host}
-                  onChange={(e) => setForm({ ...form, host: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="conn-port">Port</Label>
-                <Input
-                  id="conn-port"
-                  type="number"
-                  min={1}
-                  max={65535}
-                  value={form.port}
-                  onChange={(e) => setForm({ ...form, port: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="conn-password">Password (optional)</Label>
-                <Input
-                  id="conn-password"
-                  type="password"
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                />
-              </div>
-              {create.isError ? (
-                <p className="text-sm text-destructive">
-                  {(create.error as Error).message}
-                </p>
-              ) : null}
-              <DialogFooter>
-                <Button type="submit" disabled={create.isPending}>
-                  {create.isPending ? 'Adding...' : 'Add'}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+
+          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+            <DialogTrigger asChild>
+              <Button>Add connection</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add OBS connection</DialogTitle>
+                <DialogDescription>
+                  Each OBS instance can run on its own host, port, and password.
+                  Default port is 4455 (OBS-WebSocket convention) but anything
+                  1-65535 works.
+                </DialogDescription>
+              </DialogHeader>
+              <form
+                className="grid gap-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  create.mutate({
+                    name: addForm.name,
+                    host: addForm.host,
+                    port: Number(addForm.port),
+                    password: addForm.password || undefined,
+                  });
+                }}
+              >
+                <div className="grid gap-2">
+                  <Label htmlFor="add-name">Name</Label>
+                  <Input
+                    id="add-name"
+                    value={addForm.name}
+                    onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="add-host">Host</Label>
+                  <Input
+                    id="add-host"
+                    placeholder="192.168.1.50"
+                    value={addForm.host}
+                    onChange={(e) => setAddForm({ ...addForm, host: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="add-port">Port</Label>
+                  <Input
+                    id="add-port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={addForm.port}
+                    onChange={(e) => setAddForm({ ...addForm, port: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="add-password">Password (optional)</Label>
+                  <Input
+                    id="add-password"
+                    type="password"
+                    value={addForm.password}
+                    onChange={(e) =>
+                      setAddForm({ ...addForm, password: e.target.value })
+                    }
+                  />
+                </div>
+                {create.isError ? (
+                  <p className="text-sm text-destructive">
+                    {(create.error as Error).message}
+                  </p>
+                ) : null}
+                <DialogFooter>
+                  <Button type="submit" disabled={create.isPending}>
+                    {create.isPending ? 'Adding...' : 'Add'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -232,10 +288,140 @@ export function ConnectionsPage(): JSX.Element {
               testStatus={testStatus[c.id]}
               onTest={() => probe.mutate(c.id)}
               onDelete={() => del.mutate(c.id)}
+              onEdit={() => {
+                setEditing(c);
+                setEditForm(toEditForm(c));
+              }}
             />
           ))}
         </div>
       )}
+
+      {/* Edit dialog (controlled, opens for the connection in `editing`) */}
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(v) => {
+          if (!v) {
+            setEditing(null);
+            setEditForm(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit connection</DialogTitle>
+            <DialogDescription>
+              Change host, port, or password. Renames don&apos;t disrupt the live
+              socket; changing host/port/password reconnects with the new config.
+            </DialogDescription>
+          </DialogHeader>
+          {editing && editForm ? (
+            <form
+              className="grid gap-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const patch: Partial<ConnectionInput> = {};
+                if (editForm.name !== editing.name) patch.name = editForm.name;
+                if (editForm.host !== editing.host) patch.host = editForm.host;
+                const newPort = Number(editForm.port);
+                if (newPort !== editing.port) patch.port = newPort;
+                if (editForm.clearPassword) {
+                  patch.password = '';
+                } else if (editForm.password.length > 0) {
+                  patch.password = editForm.password;
+                }
+                update.mutate({ id: editing.id, patch });
+              }}
+            >
+              <div className="grid gap-2">
+                <Label htmlFor="edit-name">Name</Label>
+                <Input
+                  id="edit-name"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-host">Host</Label>
+                <Input
+                  id="edit-host"
+                  value={editForm.host}
+                  onChange={(e) => setEditForm({ ...editForm, host: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-port">Port</Label>
+                <Input
+                  id="edit-port"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={editForm.port}
+                  onChange={(e) => setEditForm({ ...editForm, port: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-password">
+                  Password{' '}
+                  <span className="text-xs text-muted-foreground font-normal">
+                    {editing.hasPassword
+                      ? '(leave blank to keep current)'
+                      : '(optional)'}
+                  </span>
+                </Label>
+                <Input
+                  id="edit-password"
+                  type="password"
+                  placeholder={editing.hasPassword ? '••••••••' : ''}
+                  value={editForm.password}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, password: e.target.value })
+                  }
+                  disabled={editForm.clearPassword}
+                />
+                {editing.hasPassword ? (
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
+                    <Checkbox
+                      checked={editForm.clearPassword}
+                      onCheckedChange={(v) =>
+                        setEditForm({
+                          ...editForm,
+                          clearPassword: v === true,
+                          password: v === true ? '' : editForm.password,
+                        })
+                      }
+                    />
+                    Remove password (this OBS no longer requires authentication)
+                  </label>
+                ) : null}
+              </div>
+              {update.isError ? (
+                <p className="text-sm text-destructive">
+                  {(update.error as Error).message}
+                </p>
+              ) : null}
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditing(null);
+                    setEditForm(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={update.isPending}>
+                  {update.isPending ? 'Saving...' : 'Save'}
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -245,20 +431,27 @@ function ConnectionCard({
   testStatus,
   onTest,
   onDelete,
+  onEdit,
 }: {
   conn: ConnectionConfig;
   testStatus: string | undefined;
   onTest: () => void;
   onDelete: () => void;
+  onEdit: () => void;
 }): JSX.Element {
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           <span>{conn.name}</span>
-          <Button variant="ghost" size="icon" onClick={onDelete} aria-label="Delete">
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <div className="flex gap-1">
+            <Button variant="ghost" size="icon" onClick={onEdit} aria-label="Edit">
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={onDelete} aria-label="Delete">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="grid gap-2 text-sm">

@@ -97,6 +97,19 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   await registerConnectionRoutes(server, requireSession);
   await registerDiscoverRoute(server, requireSession);
 
+  // Hydrate the obs-websocket manager from persisted connections so the
+  // dashboard sees live state immediately on boot (instead of empty tiles
+  // until someone explicitly add()s each one).
+  for (const conn of connections.list()) {
+    const password = connections.getPassword(conn.id);
+    void obsManager.add({
+      id: conn.id,
+      host: conn.host,
+      port: conn.port,
+      password,
+    });
+  }
+
   const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');
   if (existsSync(webDir)) {
     // decorateReply MUST be true (the default) so reply.sendFile() exists for

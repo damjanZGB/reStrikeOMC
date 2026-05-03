@@ -24,6 +24,14 @@ export async function registerConnectionRoutes(
       return reply.code(400).send({ error: 'invalid_body', issues: parsed.error.issues });
     }
     const c = server.connections.create(parsed.data);
+    // Open the live socket immediately so the dashboard reflects state without
+    // waiting for a server restart.
+    void server.obsManager.add({
+      id: c.id,
+      host: c.host,
+      port: c.port,
+      password: parsed.data.password ?? null,
+    });
     return reply.code(201).send(c);
   });
 
@@ -36,6 +44,23 @@ export async function registerConnectionRoutes(
     }
     const updated = server.connections.update(params.data.id, body.data);
     if (!updated) return reply.code(404).send({ error: 'not_found' });
+    // If anything that affects the live socket changed (host, port, password),
+    // tear down the existing slot and re-add with the new config. Pure renames
+    // skip the cycle so the user doesn't lose connection state for a label edit.
+    const reconnectFields: Array<keyof typeof body.data> = ['host', 'port', 'password'];
+    const needsReconnect = reconnectFields.some(
+      (k) => body.data[k] !== undefined
+    );
+    if (needsReconnect) {
+      await server.obsManager.remove(updated.id);
+      const password = server.connections.getPassword(updated.id);
+      void server.obsManager.add({
+        id: updated.id,
+        host: updated.host,
+        port: updated.port,
+        password,
+      });
+    }
     return updated;
   });
 
@@ -45,6 +70,8 @@ export async function registerConnectionRoutes(
     if (!server.connections.delete(params.data.id)) {
       return reply.code(404).send({ error: 'not_found' });
     }
+    // Stop the manager from continuing to dial a now-deleted connection.
+    await server.obsManager.remove(params.data.id);
     return reply.code(204).send();
   });
 
