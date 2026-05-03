@@ -76,18 +76,35 @@ set "ENV_FILE=%DATA_DIR%\\.env"
 
 if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
 
-if not exist "%ENV_FILE%" (
-    echo [reStrikeOMC] First run: generating secrets...
-    for /f "delims=" %%i in ('"%NODE_EXE%" -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))"') do set "SESSION_SECRET=%%i"
-    for /f "delims=" %%i in ('"%NODE_EXE%" -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))"') do set "PASSWORD_KEY=%%i"
-    > "%ENV_FILE%" (
-        echo SESSION_COOKIE_SECRET=!SESSION_SECRET!
-        echo CONNECTION_PASSWORD_KEY=!PASSWORD_KEY!
+REM Validate existing .env. If missing or any value empty, regenerate.
+set "NEED_GEN=0"
+if not exist "%ENV_FILE%" set "NEED_GEN=1"
+if "%NEED_GEN%"=="0" findstr /B /R /C:"SESSION_COOKIE_SECRET=." "%ENV_FILE%" >nul 2>&1 || set "NEED_GEN=1"
+if "%NEED_GEN%"=="0" findstr /B /R /C:"CONNECTION_PASSWORD_KEY=." "%ENV_FILE%" >nul 2>&1 || set "NEED_GEN=1"
+
+if "%NEED_GEN%"=="1" (
+    echo [reStrikeOMC] Generating secrets...
+    "%NODE_EXE%" -e "const fs=require('fs'),c=require('crypto');fs.writeFileSync(process.argv[1],'SESSION_COOKIE_SECRET='+c.randomBytes(32).toString('hex')+String.fromCharCode(10)+'CONNECTION_PASSWORD_KEY='+c.randomBytes(32).toString('hex')+String.fromCharCode(10));" "%ENV_FILE%"
+    if errorlevel 1 (
+        echo [reStrikeOMC] FATAL: failed to write %ENV_FILE%
+        pause
+        exit /b 1
     )
     echo [reStrikeOMC] Wrote "%ENV_FILE%"
 )
 
 for /f "usebackq tokens=1,* delims==" %%a in ("%ENV_FILE%") do set "%%a=%%b"
+
+if not defined SESSION_COOKIE_SECRET (
+    echo [reStrikeOMC] FATAL: SESSION_COOKIE_SECRET missing after load
+    pause
+    exit /b 1
+)
+if not defined CONNECTION_PASSWORD_KEY (
+    echo [reStrikeOMC] FATAL: CONNECTION_PASSWORD_KEY missing after load
+    pause
+    exit /b 1
+)
 
 set "PORT=8080"
 set "HOST=127.0.0.1"
