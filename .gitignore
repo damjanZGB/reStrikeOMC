@@ -51,3 +51,21 @@ app.*.map.json
 
 # Flutter Version Manager (FVM)
 .fvm/
+
+# Node
+node_modules/
+**/dist/
+**/.turbo/
+**/coverage/
+*.tsbuildinfo
+
+# Runtime data (SQLite databases, encrypted secrets, session files)
+**/data/
+
+# Playwright
+**/test-results/
+**/playwright-report/
+**/playwright/.cache/
+
+# Portable bundle artifact
+/dist-bundle/

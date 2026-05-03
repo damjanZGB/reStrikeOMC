@@ -498,8 +498,14 @@ describe('WS protocol messages', () => {
     const msg = {
       type: 'cmd.result',
       id: 'req-1',
-      ok: ['c1'],
-      failed: [{ connId: 'c2', code: 'SceneNotFound', message: 'no such scene' }],
+      ok: ['550e8400-e29b-41d4-a716-446655440001'],
+      failed: [
+        {
+          connId: '550e8400-e29b-41d4-a716-446655440002',
+          code: 'SceneNotFound',
+          message: 'no such scene',
+        },
+      ],
     };
     expect(ServerMessageSchema.parse(msg)).toEqual(msg);
   });
@@ -566,7 +572,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('cmd.result'),
-    id: z.string(),
+    id: z.string().min(1),
     ok: z.array(z.string().uuid()),
     failed: z.array(PerTargetFailureSchema),
   }),
@@ -1213,7 +1219,8 @@ describe('crypto utils', () => {
   it('rejects tampered ciphertext', () => {
     const key = deriveKeyFromString(KEY_STRING);
     const { ciphertext, iv } = encrypt(key, 'x');
-    ciphertext[0] = ciphertext[0] === 0 ? 1 : ciphertext[0] ^ 1;
+    const byte = ciphertext[0]!;
+    ciphertext[0] = byte === 0 ? 1 : byte ^ 1;
     expect(() => decrypt(key, ciphertext, iv)).toThrow();
   });
 });
@@ -1291,7 +1298,7 @@ git commit -m "feat(api): AES-256-GCM helpers for connection-password storage"
 
 `apps/api/src/auth/users.test.ts`:
 ```typescript
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1307,6 +1314,11 @@ beforeEach(() => {
   db = openDb(join(dir, 'test.db'));
   runMigrations(db);
   users = new UserRepo(db);
+});
+
+afterEach(() => {
+  db?.close();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 describe('UserRepo', () => {
@@ -1429,7 +1441,7 @@ git commit -m "feat(api): UserRepo with bcrypt password hashing"
 
 `apps/api/src/auth/sessions.test.ts`:
 ```typescript
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1450,6 +1462,11 @@ beforeEach(async () => {
   users = new UserRepo(db);
   sessions = new SessionRepo(db);
   userId = (await users.create('alice', 'pw')).id;
+});
+
+afterEach(() => {
+  db?.close();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 describe('SessionRepo', () => {
