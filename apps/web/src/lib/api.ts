@@ -4,8 +4,12 @@ async function jsonFetch<T = unknown>(
   input: RequestInfo,
   init: RequestInit = {}
 ): Promise<T> {
+  // Only send Content-Type when there is an actual body. Fastify v5 rejects an
+  // empty body whose Content-Type header claims application/json with a 400
+  // "Body cannot be empty when content-type is set to 'application/json'".
+  const hasBody = init.body !== undefined && init.body !== null;
   const headers: HeadersInit = {
-    'content-type': 'application/json',
+    ...(hasBody ? { 'content-type': 'application/json' } : {}),
     ...(init.headers ?? {}),
   };
   const res = await fetch(input, { credentials: 'include', ...init, headers });

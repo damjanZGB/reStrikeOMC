@@ -99,10 +99,12 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
 
   const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');
   if (existsSync(webDir)) {
+    // decorateReply MUST be true (the default) so reply.sendFile() exists for
+    // the SPA fallback handler below — passing false here makes the fallback
+    // throw at runtime and surface as 500 on /favicon.ico and any unknown path.
     await server.register(fastifyStatic, {
       root: webDir,
       prefix: '/',
-      decorateReply: false,
     });
     server.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith('/api') || req.url.startsWith('/ws')) {
