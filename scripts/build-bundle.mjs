@@ -148,10 +148,24 @@ async function main() {
   const appDir = resolve(outDir, 'app');
 
   if (!skipDeploy) {
-    console.log('[bundle] Running pnpm deploy --prod for @restrike/api ...');
-    run('pnpm', ['--filter', '@restrike/api', 'deploy', '--prod', appDir], {
-      cwd: repoRoot,
-    });
+    console.log('[bundle] Running pnpm deploy --prod (hoisted) for @restrike/api ...');
+    // node-linker=hoisted = npm-style flat node_modules, so transitive deps
+    // are discoverable by Node's standard upward node_modules walk. pnpm's
+    // default isolated layout uses .pnpm/ + symlinks which break the moment
+    // cp -r materializes those symlinks as real directories on a target
+    // machine — Node then can't find e.g. `debug` from inside obs-websocket-js.
+    run(
+      'pnpm',
+      [
+        '--filter',
+        '@restrike/api',
+        '--config.node-linker=hoisted',
+        'deploy',
+        '--prod',
+        appDir,
+      ],
+      { cwd: repoRoot }
+    );
   } else {
     console.log('[bundle] --skip-deploy: assuming app/ already deployed');
   }
