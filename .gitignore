@@ -61,3 +61,8 @@ node_modules/
 
 # Runtime data (SQLite databases, encrypted secrets, session files)
 **/data/
+
+# Playwright
+**/test-results/
+**/playwright-report/
+**/playwright/.cache/

@@ -7,6 +7,10 @@ const SetupBody = z.object({
 });
 
 export async function registerSetupRoute(server: FastifyInstance): Promise<void> {
+  server.get('/api/setup/status', async () => ({
+    initialized: server.users.count() > 0,
+  }));
+
   server.post('/api/setup', async (req, reply) => {
     const parsed = SetupBody.safeParse(req.body);
     if (!parsed.success) {

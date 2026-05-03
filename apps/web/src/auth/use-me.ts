@@ -16,23 +16,12 @@ export function useMe(): UseMeResult {
     staleTime: 60_000,
   });
 
-  // If /api/me returns 401, try to detect setup state by attempting a login probe.
-  // First-run check: a 401 plus "no users" is detected by attempting setup with bogus
-  // creds and observing 409 (already initialized) vs success-eligible.
   const setupProbe = useQuery({
-    queryKey: ['setup-probe'],
+    queryKey: ['setup-status'],
     queryFn: async () => {
-      // Try setup with intentionally invalid (too short) password to see if endpoint
-      // accepts the route (no users) vs rejects (users exist). Setup endpoint returns
-      // 409 if already initialized, 400 for invalid body, 201 for success.
-      const res = await fetch('/api/setup', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username: '', password: '' }),
-      });
-      // 409 = users already exist. 400 = no users yet (validation failed but endpoint open).
-      return res.status === 409 ? 'has_users' : 'no_users';
+      const res = await fetch('/api/setup/status', { credentials: 'include' });
+      if (!res.ok) throw new Error(`setup status failed: ${res.status}`);
+      return (await res.json()) as { initialized: boolean };
     },
     enabled: meQuery.isError,
     retry: false,
@@ -43,7 +32,7 @@ export function useMe(): UseMeResult {
     user: meQuery.data ?? null,
     loading: meQuery.isLoading || (meQuery.isError && setupProbe.isLoading),
     needsSetup:
-      meQuery.isError && setupProbe.isSuccess && setupProbe.data === 'no_users',
+      meQuery.isError && setupProbe.isSuccess && !setupProbe.data.initialized,
     error: meQuery.error,
   };
 }

@@ -158,16 +158,18 @@ export function ConnectionsPage(): JSX.Element {
               }}
             >
               <div className="grid gap-2">
-                <Label>Name</Label>
+                <Label htmlFor="conn-name">Name</Label>
                 <Input
+                  id="conn-name"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   required
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Host</Label>
+                <Label htmlFor="conn-host">Host</Label>
                 <Input
+                  id="conn-host"
                   placeholder="192.168.1.50"
                   value={form.host}
                   onChange={(e) => setForm({ ...form, host: e.target.value })}
@@ -175,8 +177,9 @@ export function ConnectionsPage(): JSX.Element {
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Port</Label>
+                <Label htmlFor="conn-port">Port</Label>
                 <Input
+                  id="conn-port"
                   type="number"
                   min={1}
                   max={65535}
@@ -186,8 +189,9 @@ export function ConnectionsPage(): JSX.Element {
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Password (optional)</Label>
+                <Label htmlFor="conn-password">Password (optional)</Label>
                 <Input
+                  id="conn-password"
                   type="password"
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}

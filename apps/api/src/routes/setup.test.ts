@@ -50,3 +50,32 @@ describe('POST /api/setup', () => {
     }
   });
 });
+
+describe('GET /api/setup/status', () => {
+  it('returns initialized=false when no users exist', async () => {
+    const { server, close } = await buildTestServer();
+    try {
+      const res = await server.inject({ method: 'GET', url: '/api/setup/status' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ initialized: false });
+    } finally {
+      await close();
+    }
+  });
+
+  it('returns initialized=true after first-run setup', async () => {
+    const { server, close } = await buildTestServer();
+    try {
+      await server.inject({
+        method: 'POST',
+        url: '/api/setup',
+        payload: { username: 'alice', password: 'longenoughpw' },
+      });
+      const res = await server.inject({ method: 'GET', url: '/api/setup/status' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ initialized: true });
+    } finally {
+      await close();
+    }
+  });
+});
