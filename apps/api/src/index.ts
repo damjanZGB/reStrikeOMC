@@ -99,15 +99,26 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
 
   // Hydrate the obs-websocket manager from persisted connections so the
   // dashboard sees live state immediately on boot (instead of empty tiles
-  // until someone explicitly add()s each one).
+  // until someone explicitly add()s each one). Wrap each connection in
+  // try/catch — a single bad row (e.g. password decryption failure if the
+  // CONNECTION_PASSWORD_KEY was rotated) must not take down the whole boot.
   for (const conn of connections.list()) {
-    const password = connections.getPassword(conn.id);
-    void obsManager.add({
-      id: conn.id,
-      host: conn.host,
-      port: conn.port,
-      password,
-    });
+    try {
+      const password = connections.getPassword(conn.id);
+      void obsManager
+        .add({ id: conn.id, host: conn.host, port: conn.port, password })
+        .catch((err) =>
+          server.log.error(
+            { err, connId: conn.id },
+            'manager.add failed during hydration'
+          )
+        );
+    } catch (err) {
+      server.log.error(
+        { err, connId: conn.id, name: conn.name },
+        'failed to hydrate connection (skipping)'
+      );
+    }
   }
 
   const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');
@@ -148,8 +159,30 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  // Process-level safety net: surface any silent crash with a stack trace
+  // before the runtime exits. Without these, an unhandled rejection (e.g.
+  // from a fire-and-forget promise inside the obs-websocket layer) takes
+  // the api down with no diagnostic — and on Windows the cmd window can
+  // close before you read the message.
+  process.on('uncaughtException', (err) => {
+    // eslint-disable-next-line no-console
+    console.error('[fatal] uncaughtException:', err);
+  });
+  process.on('unhandledRejection', (reason) => {
+    // eslint-disable-next-line no-console
+    console.error('[fatal] unhandledRejection:', reason);
+  });
+
   const port = Number(process.env.PORT ?? 8080);
   const host = process.env.HOST ?? '0.0.0.0';
-  const server = await buildServer();
-  await server.listen({ port, host });
+  try {
+    const server = await buildServer();
+    await server.listen({ port, host });
+    // eslint-disable-next-line no-console
+    console.log(`[reStrikeOMC] ready on http://${host}:${port}/`);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[fatal] failed to start server:', err);
+    process.exit(1);
+  }
 }

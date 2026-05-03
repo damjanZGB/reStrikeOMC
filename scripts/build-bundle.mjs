@@ -111,14 +111,42 @@ set "HOST=127.0.0.1"
 set "DB_PATH=%DATA_DIR%\\restrike.db"
 
 echo [reStrikeOMC] Starting server on http://%HOST%:%PORT%/
-echo [reStrikeOMC] Press Ctrl+C to stop. The first request may take a moment.
+echo [reStrikeOMC] Press Ctrl+C to stop. Keep this window open while you use the app.
 
+REM Launch the api so its output (incl. any crash stack) stays in this window.
+REM Open the browser only after the port is accepting connections, so the user
+REM does not see ERR_CONNECTION_REFUSED on first page load.
+start /b "" "%NODE_EXE%" "%APP_DIR%\\dist\\index.js"
+
+echo [reStrikeOMC] Waiting for server to accept connections...
+set "WAIT_SECS=0"
+:wait_for_port
+powershell -NoProfile -Command "try { (New-Object Net.Sockets.TcpClient).Connect('%HOST%',%PORT%); exit 0 } catch { exit 1 }" >nul 2>&1
+if not errorlevel 1 goto port_ready
+set /a WAIT_SECS+=1
+if %WAIT_SECS% geq 30 (
+    echo [reStrikeOMC] WARNING: server did not bind within 30s. Opening browser anyway.
+    goto port_ready
+)
+timeout /t 1 /nobreak >nul
+goto wait_for_port
+
+:port_ready
+echo [reStrikeOMC] Server up. Opening browser...
 start "" "http://%HOST%:%PORT%/"
 
-"%NODE_EXE%" "%APP_DIR%\\dist\\index.js"
+REM Block until node exits so closing this window stops the server.
+:tail_node
+tasklist /FI "IMAGENAME eq node.exe" 2>nul | find /I "node.exe" >nul
+if errorlevel 1 goto node_exited
+timeout /t 2 /nobreak >nul
+goto tail_node
 
+:node_exited
 echo.
-echo [reStrikeOMC] Server stopped. Press any key to close.
+echo [reStrikeOMC] Server stopped (node.exe exited).
+echo [reStrikeOMC] If unexpected, scroll up for any stack trace.
+echo [reStrikeOMC] Press any key to close this window.
 pause >nul
 endlocal
 `;
