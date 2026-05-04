@@ -62,6 +62,14 @@ node_modules/
 # Runtime data (SQLite databases, encrypted secrets, session files)
 **/data/
 
+# Local env files (real secrets — only .env.example is tracked)
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Claude Code local session config (per-machine permissions, not portable)
+.claude/
+
 # Playwright
 **/test-results/
 **/playwright-report/
