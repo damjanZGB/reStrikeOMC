@@ -1,6 +1,12 @@
-import { OBSWebSocket } from 'obs-websocket-js';
+import { OBSWebSocket, EventSubscription } from 'obs-websocket-js';
 import { EventEmitter } from 'node:events';
 import type { ConnectionStatus } from '@restrike/shared';
+
+// EventSubscription.All explicitly EXCLUDES the high-volume InputVolumeMeters
+// flag (1<<16). Without this OR, no level data ever arrives at the client,
+// even though obs-websocket-js will silently swallow the missing subscription
+// without an error. Discovered via obsproject/obs-websocket discussion #1152.
+const EVENT_SUBSCRIPTIONS = EventSubscription.All | EventSubscription.InputVolumeMeters;
 
 export interface ConnectionTarget {
   id: string;
@@ -31,12 +37,20 @@ export interface OutputSnapshot {
   virtualCam: { active: boolean };
 }
 
+export interface SnapshotInput {
+  name: string;
+  kind: string;
+  muted: boolean;
+  volumeMul: number;
+  volumeDb: number;
+}
+
 export interface SnapshotEvent {
   connId: string;
   currentProgramScene: string | null;
   currentPreviewScene: string | null;
   scenes: Array<{ name: string; index: number }>;
-  inputs: Array<{ name: string; kind: string }>;
+  inputs: SnapshotInput[];
   outputs: OutputSnapshot;
 }
 
@@ -156,6 +170,46 @@ export class ConnectionManager extends EventEmitter {
       return;
     }
 
+    // Second fan-out: per-input mute and volume. We call these for every input
+    // — non-audio sources will reject (OBS returns code 604), Promise.allSettled
+    // absorbs the rejection, and we fall back to defaults for that input.
+    // Without this, the dashboard renders every audio source at 100% unmuted
+    // regardless of what OBS actually has set.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawInputs: any[] = inputList?.inputs ?? [];
+    const audioStates = await Promise.allSettled(
+      rawInputs.map(async (i) => {
+        const name = String(i.inputName);
+        const [mute, vol] = await Promise.allSettled([
+          slot.client.call('GetInputMute', { inputName: name }),
+          slot.client.call('GetInputVolume', { inputName: name }),
+        ]);
+        return {
+          name,
+          kind: String(i.inputKind),
+          muted: mute.status === 'fulfilled' ? !!mute.value.inputMuted : false,
+          volumeMul:
+            vol.status === 'fulfilled' ? Number(vol.value.inputVolumeMul) : 1,
+          volumeDb: vol.status === 'fulfilled' ? Number(vol.value.inputVolumeDb) : 0,
+        };
+      })
+    );
+
+    const inputs: SnapshotInput[] = audioStates.flatMap((s, idx) => {
+      if (s.status === 'fulfilled') return [s.value];
+      // The whole pair rejected (e.g. input was removed mid-fetch). Fall back
+      // to name+kind only, defaults for the audio fields.
+      return [
+        {
+          name: String(rawInputs[idx]?.inputName ?? ''),
+          kind: String(rawInputs[idx]?.inputKind ?? ''),
+          muted: false,
+          volumeMul: 1,
+          volumeDb: 0,
+        },
+      ];
+    });
+
     this.emit('snapshot', {
       connId: slot.target.id,
       currentProgramScene: sceneList?.currentProgramSceneName ?? null,
@@ -165,11 +219,7 @@ export class ConnectionManager extends EventEmitter {
         name: String(s.sceneName),
         index: Number(s.sceneIndex),
       })),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      inputs: (inputList?.inputs ?? []).map((i: any) => ({
-        name: String(i.inputName),
-        kind: String(i.inputKind),
-      })),
+      inputs,
       outputs: {
         streaming: {
           active: !!streamStatus?.outputActive,
@@ -189,7 +239,10 @@ export class ConnectionManager extends EventEmitter {
   private async openOnce(slot: Slot): Promise<void> {
     const url = `ws://${slot.target.host}:${slot.target.port}`;
     try {
-      await slot.client.connect(url, slot.target.password ?? undefined);
+      await slot.client.connect(url, slot.target.password ?? undefined, {
+        eventSubscriptions: EVENT_SUBSCRIPTIONS,
+        rpcVersion: 1,
+      });
     } catch (err) {
       const code = (err as { code?: number }).code;
       if (code === 4009) {

@@ -4,10 +4,46 @@ import {
   ServerMessageSchema,
   type InstanceState,
   type InstanceStateDiff,
+  type InputState,
+  type InputStatePartial,
   type ServerMessage,
   type ClientMessage,
   type PerTargetFailure,
 } from '@restrike/shared';
+
+function defaultInput(name: string): InputState {
+  return {
+    name,
+    kind: '',
+    muted: false,
+    volumeDb: 0,
+    volumeMul: 1,
+    syncOffsetMs: 0,
+    levels: [],
+  };
+}
+
+function mergeInputs(
+  current: readonly InputState[],
+  partials: readonly InputStatePartial[]
+): InputState[] {
+  // Mirror of state-store.ts mergeInputs — keyed by name, per-field
+  // nullish-coalesce so a meter event does not clobber muted/volumeMul.
+  const byName = new Map(current.map((i) => [i.name, i]));
+  for (const p of partials) {
+    const existing = byName.get(p.name) ?? defaultInput(p.name);
+    byName.set(p.name, {
+      name: p.name,
+      kind: p.kind ?? existing.kind,
+      muted: p.muted ?? existing.muted,
+      volumeDb: p.volumeDb ?? existing.volumeDb,
+      volumeMul: p.volumeMul ?? existing.volumeMul,
+      syncOffsetMs: p.syncOffsetMs ?? existing.syncOffsetMs,
+      levels: p.levels ?? existing.levels,
+    });
+  }
+  return Array.from(byName.values());
+}
 
 interface WsState {
   connected: boolean;
@@ -49,6 +85,7 @@ export const useWsStore = create<WsState>((set) => ({
         ...diff,
         connId: diff.connId,
         outputs: mergedOutputs,
+        inputs: diff.inputs ? mergeInputs(current.inputs, diff.inputs) : current.inputs,
       };
       return {
         states: {

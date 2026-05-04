@@ -17,12 +17,15 @@ export function wireOBSToState(
       currentProgramScene: snap.currentProgramScene,
       currentPreviewScene: snap.currentPreviewScene,
       scenes: snap.scenes,
+      // Real mute/volume from connection-manager.fetchSnapshot — see the
+      // GetInputMute/GetInputVolume fan-out there. Defaults syncOffsetMs and
+      // levels to zero/empty until events arrive.
       inputs: snap.inputs.map((i) => ({
         name: i.name,
         kind: i.kind,
-        muted: false,
-        volumeDb: 0,
-        volumeMul: 1,
+        muted: i.muted,
+        volumeDb: i.volumeDb,
+        volumeMul: i.volumeMul,
         syncOffsetMs: 0,
         levels: [],
       })),

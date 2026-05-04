@@ -19,6 +19,12 @@ export interface OutputState {
   virtualCam: boolean;
 }
 
+export interface InputAudioState {
+  muted: boolean;
+  volumeMul: number;
+  volumeDb: number;
+}
+
 export interface MockHandle {
   port: number;
   close: () => Promise<void>;
@@ -26,6 +32,15 @@ export interface MockHandle {
   setSceneList: (scenes: string[]) => void;
   setInputList: (inputs: Array<{ name: string; kind: string }>) => void;
   setOutputs: (patch: Partial<OutputState>) => void;
+  /** Seed an input's mute state. Used by tests to put OBS into "already muted"
+   *  before the dashboard connects. Does NOT emit an event. */
+  setInputMute: (name: string, muted: boolean) => void;
+  /** Seed an input's volume. mul is linear (0..1+), db is the same value
+   *  expressed in decibels. Both must be supplied — OBS reports both. */
+  setInputVolume: (name: string, vol: { mul: number; db: number }) => void;
+  /** Emit an InputVolumeMeters event over the wire to all connected clients.
+   *  Each entry is [average, current, peak] per channel — the tuple OBS uses. */
+  emitMeters: (perInput: Record<string, number[][]>) => void;
   receivedRequests: ReceivedRequest[];
 }
 
@@ -73,6 +88,15 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
   let inputs: Array<{ name: string; kind: string }> = [
     { name: 'Mic', kind: 'wasapi_input_capture' },
   ];
+  const audio = new Map<string, InputAudioState>();
+  function audioFor(name: string): InputAudioState {
+    let s = audio.get(name);
+    if (!s) {
+      s = { muted: false, volumeMul: 1, volumeDb: 0 };
+      audio.set(name, s);
+    }
+    return s;
+  }
   let outputs: OutputState = {
     streaming: false,
     recording: false,
@@ -84,6 +108,13 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
 
   function send(ws: WebSocket, encoding: 'json' | 'msgpack', op: number, d: unknown): void {
     ws.send(encodeFrame(encoding, op, d));
+  }
+
+  function broadcast(op: number, d: unknown): void {
+    for (const c of clients) {
+      const enc = (c as WebSocket & { __mockEnc?: 'json' | 'msgpack' }).__mockEnc ?? 'json';
+      send(c, enc, op, d);
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -158,7 +189,14 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
           if (typeof requestData?.inputMuted !== 'boolean') {
             return reply({ result: false, code: 402, comment: 'inputMuted must be boolean' });
           }
-          return reply({ result: true, code: 100 });
+          audioFor(name).muted = requestData.inputMuted as boolean;
+          reply({ result: true, code: 100 });
+          broadcast(5, {
+            eventType: 'InputMuteStateChanged',
+            eventIntent: 1,
+            eventData: { inputName: name, inputMuted: audioFor(name).muted },
+          });
+          return;
         }
         case 'SetInputVolume': {
           const name = requestData?.inputName as string;
@@ -175,7 +213,39 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
               comment: 'inputVolumeMul or inputVolumeDb required',
             });
           }
-          return reply({ result: true, code: 100 });
+          const a = audioFor(name);
+          if (typeof requestData?.inputVolumeMul === 'number') {
+            a.volumeMul = requestData.inputVolumeMul as number;
+            a.volumeDb = a.volumeMul > 0 ? 20 * Math.log10(a.volumeMul) : -100;
+          } else {
+            a.volumeDb = requestData?.inputVolumeDb as number;
+            a.volumeMul = Math.pow(10, a.volumeDb / 20);
+          }
+          reply({ result: true, code: 100 });
+          broadcast(5, {
+            eventType: 'InputVolumeChanged',
+            eventIntent: 1,
+            eventData: { inputName: name, inputVolumeMul: a.volumeMul, inputVolumeDb: a.volumeDb },
+          });
+          return;
+        }
+        case 'GetInputMute': {
+          const name = requestData?.inputName as string;
+          if (!inputs.find((i) => i.name === name)) {
+            return reply({ result: false, code: 601, comment: 'no such input' });
+          }
+          return reply({ result: true, code: 100 }, { inputMuted: audioFor(name).muted });
+        }
+        case 'GetInputVolume': {
+          const name = requestData?.inputName as string;
+          if (!inputs.find((i) => i.name === name)) {
+            return reply({ result: false, code: 601, comment: 'no such input' });
+          }
+          const a = audioFor(name);
+          return reply(
+            { result: true, code: 100 },
+            { inputVolumeMul: a.volumeMul, inputVolumeDb: a.volumeDb }
+          );
         }
         case 'GetStreamStatus':
           return reply(
@@ -291,6 +361,26 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
     },
     setOutputs(patch) {
       outputs = { ...outputs, ...patch };
+    },
+    setInputMute(name, muted) {
+      audioFor(name).muted = muted;
+    },
+    setInputVolume(name, vol) {
+      const a = audioFor(name);
+      a.volumeMul = vol.mul;
+      a.volumeDb = vol.db;
+    },
+    emitMeters(perInput) {
+      broadcast(5, {
+        eventType: 'InputVolumeMeters',
+        eventIntent: 1 << 16,
+        eventData: {
+          inputs: Object.entries(perInput).map(([inputName, channels]) => ({
+            inputName,
+            inputLevelsMul: channels,
+          })),
+        },
+      });
     },
     receivedRequests,
   };

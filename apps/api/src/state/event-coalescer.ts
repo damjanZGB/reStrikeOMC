@@ -1,4 +1,4 @@
-import type { InstanceStateDiff, InputState } from '@restrike/shared';
+import type { InstanceStateDiff, InputStatePartial } from '@restrike/shared';
 
 export const FLUSH_INTERVAL_MS = 33;
 
@@ -86,11 +86,37 @@ export class EventCoalescer {
       case 'StudioModeStateChanged':
         return { connId, studioMode: !!ev.studioModeEnabled };
       case 'InputMuteStateChanged':
-        return { connId, inputs: [] };
+        return {
+          connId,
+          inputs: [{ name: String(ev.inputName), muted: !!ev.inputMuted }],
+        };
       case 'InputVolumeChanged':
-        return { connId, inputs: [] };
+        return {
+          connId,
+          inputs: [
+            {
+              name: String(ev.inputName),
+              volumeMul: Number(ev.inputVolumeMul),
+              volumeDb: Number(ev.inputVolumeDb),
+            },
+          ],
+        };
       case 'InputVolumeMeters':
         return { connId, inputs: this.translateMeters(ev.inputs) };
+      case 'InputCreated':
+        return {
+          connId,
+          inputs: [{ name: String(ev.inputName), kind: String(ev.inputKind ?? '') }],
+        };
+      case 'InputNameChanged':
+        // Rename: the inputs array is name-keyed. Treat as a remove + add by
+        // emitting an entry under the new name; the old entry will be pruned
+        // the next time the snapshot reconciles. Conservative — never destroy
+        // state that another event might still need.
+        return {
+          connId,
+          inputs: [{ name: String(ev.inputName) }],
+        };
       case 'StreamStateChanged':
         return {
           connId,
@@ -123,14 +149,13 @@ export class EventCoalescer {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private translateMeters(inputs: any[]): InputState[] {
+  private translateMeters(inputs: any[]): InputStatePartial[] {
+    // Returns ONLY `{ name, levels }` — never muted/volumeMul/kind defaults.
+    // A meter event arrives ~30×/sec; if we returned a full InputState here,
+    // the per-input merge would still survive thanks to the partial schema,
+    // but emitting only the fields we actually know is the safer contract.
     return (inputs ?? []).map((i) => ({
       name: String(i.inputName),
-      kind: '',
-      muted: false,
-      volumeDb: 0,
-      volumeMul: 0,
-      syncOffsetMs: 0,
       levels: (i.inputLevelsMul ?? []).map((ch: number[]) => ({
         current: ch[0] ?? 0,
         average: ch[1] ?? 0,

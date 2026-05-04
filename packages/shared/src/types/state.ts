@@ -32,6 +32,24 @@ export const InputStateSchema = z.object({
 });
 export type InputState = z.infer<typeof InputStateSchema>;
 
+/**
+ * Diffs may carry partial per-input updates — e.g. an InputMuteStateChanged
+ * carries only `{ name, muted }`, an InputVolumeMeters carries only `{ name,
+ * levels }`. The StateStore (and the web client's mirror) deep-merge per-input
+ * keyed by name so a single field change never clobbers the other fields. The
+ * `name` is the only required key — it identifies which input to update.
+ */
+export const InputStatePartialSchema = z.object({
+  name: z.string(),
+  kind: z.string().optional(),
+  muted: z.boolean().optional(),
+  volumeDb: z.number().optional(),
+  volumeMul: z.number().nonnegative().optional(),
+  syncOffsetMs: z.number().int().optional(),
+  levels: z.array(InputChannelLevelSchema).optional(),
+});
+export type InputStatePartial = z.infer<typeof InputStatePartialSchema>;
+
 const StreamingOutputSchema = z.object({
   active: z.boolean(),
   durationMs: z.number().int().nonnegative(),
@@ -91,5 +109,9 @@ export const InstanceStateDiffSchema = InstanceStateSchema.partial().extend({
   // so producers can emit just `outputs: { streaming: {...} }` without having
   // to also send synthetic defaults for recording/replay/virtualcam.
   outputs: OutputSnapshotPartialSchema.optional(),
+  // Same idea for inputs: a mute toggle carries only { name, muted }, a meter
+  // event carries only { name, levels }. The store keys by name and merges
+  // field-by-field so siblings (and other fields on the same input) survive.
+  inputs: z.array(InputStatePartialSchema).optional(),
 });
 export type InstanceStateDiff = z.infer<typeof InstanceStateDiffSchema>;
