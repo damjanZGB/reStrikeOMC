@@ -22,6 +22,14 @@
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 10%;
     --radius: 0.5rem;
+
+    /* VU meter zone colors (IEC-style: green to -20 dB, yellow to -9 dB, red
+     * thereafter). Phase 3 will refine the broader palette; these locked-in
+     * values are referenced directly by vu-meter.tsx via getComputedStyle. */
+    --vu-green: 145 65% 45%;
+    --vu-yellow: 45 95% 55%;
+    --vu-red: 0 75% 55%;
+    --vu-track: 220 14% 88%;
   }
 
   .dark {
@@ -42,6 +50,11 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 240 4.9% 83.9%;
+
+    --vu-green: 145 65% 45%;
+    --vu-yellow: 45 95% 55%;
+    --vu-red: 0 75% 55%;
+    --vu-track: 220 14% 14%;
   }
 
   * { @apply border-border; }

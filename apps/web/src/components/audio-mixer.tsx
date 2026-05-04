@@ -3,6 +3,7 @@ import type { InputState } from '@restrike/shared';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { Volume2, VolumeX } from 'lucide-react';
+import { VuMeter } from '@/components/vu-meter';
 
 export interface AudioMixerProps {
   inputs: InputState[];
@@ -17,7 +18,7 @@ export function AudioMixer({ inputs, onMute, onVolume }: AudioMixerProps): JSX.E
   return (
     <div className="grid gap-2">
       <p className="text-xs uppercase text-muted-foreground">Audio</p>
-      <div className="grid gap-2">
+      <div className="grid gap-3">
         {inputs.map((input) => (
           <AudioRow
             key={input.name}
@@ -29,6 +30,11 @@ export function AudioMixer({ inputs, onMute, onVolume }: AudioMixerProps): JSX.E
       </div>
     </div>
   );
+}
+
+function formatDb(db: number): string {
+  if (!Number.isFinite(db) || db <= -60) return '−∞';
+  return `${db >= 0 ? '+' : ''}${db.toFixed(1)} dB`;
 }
 
 function AudioRow({
@@ -58,13 +64,13 @@ function AudioRow({
       >
         {input.muted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
       </Button>
-      <div className="grid gap-0.5">
-        <div className="flex justify-between">
+      <div className="grid gap-1">
+        <div className="flex justify-between gap-2">
           <span className="font-medium truncate" title={input.name}>
             {input.name}
           </span>
-          <span className="text-muted-foreground tabular-nums">
-            {Math.round(localMul * 100)}%
+          <span className="text-muted-foreground tabular-nums whitespace-nowrap">
+            {Math.round(localMul * 100)}% · {formatDb(input.volumeDb)}
           </span>
         </div>
         <Slider
@@ -76,6 +82,7 @@ function AudioRow({
           onValueCommit={(v) => onVolume(v[0] ?? 0)}
           disabled={input.muted}
         />
+        <VuMeter levels={input.levels} muted={input.muted} />
       </div>
     </div>
   );
