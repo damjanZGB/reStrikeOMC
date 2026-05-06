@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { ConnectionConfig, InstanceState, PerTargetFailure } from '@restrike/shared';
 import { api } from '@/lib/api';
@@ -8,8 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { AudioMixer } from '@/components/audio-mixer';
+import { StatusDot } from '@/components/status-dot';
 import { Wifi, WifiOff, Radio, RadioReceiver } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getTileStateColor, type TileStateColor } from '@/lib/tile-state';
 
 export function DashboardPage(): JSX.Element {
   const ws = useWs();
@@ -57,7 +59,7 @@ export function DashboardPage(): JSX.Element {
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <div className="flex items-center gap-2 text-sm">
           {ws.connected ? (
-            <span className="flex items-center gap-1 text-green-600">
+            <span className="flex items-center gap-1 text-state-ok">
               <Wifi className="h-4 w-4" /> Live
             </span>
           ) : (
@@ -129,7 +131,7 @@ export function DashboardPage(): JSX.Element {
               {lastResult ? (
                 <div className="text-sm border-t pt-3">
                   <p className="font-medium">{lastResult.action}</p>
-                  <p className="text-green-600">ok: {lastResult.ok.length}</p>
+                  <p className="text-state-ok">ok: {lastResult.ok.length}</p>
                   {lastResult.failed.length > 0 ? (
                     <ul className="text-destructive text-xs mt-1">
                       {lastResult.failed.map((f) => (
@@ -179,6 +181,56 @@ export function DashboardPage(): JSX.Element {
   );
 }
 
+// Status text color by connection status — used in the tile header. Active
+// outputs get their own dedicated badges below, so this is just the WebSocket
+// link state, not the broadcast state.
+function statusTextClass(status: InstanceState['status']): string {
+  switch (status) {
+    case 'connected':
+      return 'text-state-ok';
+    case 'connecting':
+      return 'text-state-warn';
+    case 'auth_failed':
+      return 'text-state-bad';
+    default:
+      return 'text-muted-foreground';
+  }
+}
+
+function stripeColorVar(color: TileStateColor): string {
+  return color === 'subtle' ? 'var(--border)' : `var(--state-${color})`;
+}
+
+function OutputBadge({
+  active,
+  label,
+  variant,
+}: {
+  active: boolean;
+  label: string;
+  variant: 'live' | 'record' | 'replay' | 'vcam';
+}): JSX.Element {
+  if (!active) {
+    return <span className="text-fg-subtle">{label}: off</span>;
+  }
+  // Pulsing dot + colored label so an active output reads from across the room.
+  const pulse = variant === 'live' || variant === 'record';
+  return (
+    <span className="flex items-center gap-1.5">
+      <span
+        className={cn(
+          'inline-block h-2 w-2 rounded-full',
+          pulse && 'animate-pulse'
+        )}
+        style={{ backgroundColor: `hsl(var(--state-${variant}))` }}
+      />
+      <span style={{ color: `hsl(var(--state-${variant}))` }} className="font-medium">
+        {label}
+      </span>
+    </span>
+  );
+}
+
 function InstanceTile({
   conn,
   live,
@@ -197,29 +249,29 @@ function InstanceTile({
   onVolume: (inputName: string, volumeMul: number) => void;
 }): JSX.Element {
   const status = live?.status ?? 'disconnected';
-  const statusColor =
-    status === 'connected'
-      ? 'text-green-600'
-      : status === 'connecting'
-        ? 'text-amber-600'
-        : status === 'auth_failed'
-          ? 'text-destructive'
-          : 'text-muted-foreground';
+  const tileColor = getTileStateColor(live);
+  const stripeStyle: CSSProperties = {
+    borderLeftColor: `hsl(${stripeColorVar(tileColor)})`,
+  };
 
   return (
-    <Card className={cn(selected && 'ring-2 ring-primary')}>
+    <Card
+      className={cn('border-l-2', selected && 'ring-2 ring-primary')}
+      style={stripeStyle}
+    >
       <CardHeader>
         <div className="flex items-start justify-between">
           <div className="grid gap-1">
             <CardTitle className="flex items-center gap-2">
               <Checkbox checked={selected} onCheckedChange={onToggle} aria-label="Select tile" />
+              <StatusDot color={tileColor} />
               {conn.name}
             </CardTitle>
             <p className="text-xs text-muted-foreground">
               {conn.host}:{conn.port}
             </p>
           </div>
-          <span className={cn('text-xs font-medium', statusColor)}>{status}</span>
+          <span className={cn('text-xs font-medium', statusTextClass(status))}>{status}</span>
         </div>
       </CardHeader>
       <CardContent className="grid gap-3">
@@ -249,12 +301,26 @@ function InstanceTile({
               </div>
             </div>
             <div className="flex flex-wrap gap-3 text-xs">
-              <span>
-                stream: {live.outputs.streaming.active ? '🔴 on' : 'off'}
-              </span>
-              <span>
-                record: {live.outputs.recording.active ? '🔴 on' : 'off'}
-              </span>
+              <OutputBadge
+                active={live.outputs.streaming.active}
+                label="STREAM"
+                variant="live"
+              />
+              <OutputBadge
+                active={live.outputs.recording.active}
+                label="REC"
+                variant="record"
+              />
+              <OutputBadge
+                active={live.outputs.replayBuffer.active}
+                label="REPLAY"
+                variant="replay"
+              />
+              <OutputBadge
+                active={live.outputs.virtualCam.active}
+                label="VCAM"
+                variant="vcam"
+              />
             </div>
             <AudioMixer inputs={live.inputs} onMute={onMute} onVolume={onVolume} />
           </>

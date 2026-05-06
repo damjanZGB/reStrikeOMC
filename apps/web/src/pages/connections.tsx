@@ -468,10 +468,10 @@ function ConnectionCard({
             <span
               className={
                 testStatus === 'ok'
-                  ? 'text-green-600'
+                  ? 'text-state-ok'
                   : testStatus === 'auth_failed'
-                    ? 'text-amber-600'
-                    : 'text-destructive'
+                    ? 'text-state-warn'
+                    : 'text-state-bad'
               }
             >
               {testStatus}

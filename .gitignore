@@ -70,6 +70,9 @@ node_modules/
 # Claude Code local session config (per-machine permissions, not portable)
 .claude/
 
+# Playwright MCP scratch (snapshots, console logs from local dev sessions)
+.playwright-mcp/
+
 # Playwright
 **/test-results/
 **/playwright-report/

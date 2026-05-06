@@ -2,54 +2,109 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * reStrikeOMC theme tokens — dark studio palette, semantic state colors.
+ *
+ * Two layers:
+ *   1. shadcn-compatible tokens (--background, --foreground, --card, etc.)
+ *      retoned to dark-studio values. Existing components keep working.
+ *   2. New semantic tokens (--state-*, --surface-1..3, --fg-subtle, --vu-*)
+ *      that communicate output/connection state at a glance.
+ *
+ * The app is dark-by-default — :root and .dark carry the same tokens, so the
+ * theme is consistent whether or not <html class="dark"> is set.
+ */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
+    /* Surfaces (deep blue-black, not pure black — control room aesthetic) */
+    --background: 220 18% 8%;
+    --foreground: 210 25% 96%;
+    --card: 220 16% 11%;
+    --card-foreground: 210 25% 96%;
+    --popover: 220 16% 11%;
+    --popover-foreground: 210 25% 96%;
+
+    /* Primary action: cyan — evokes "broadcast / signal" */
+    --primary: 200 95% 55%;
+    --primary-foreground: 220 30% 8%;
+
+    --secondary: 220 14% 15%;
+    --secondary-foreground: 210 25% 96%;
+    --muted: 220 14% 15%;
+    --muted-foreground: 220 10% 65%;
+    --accent: 220 14% 15%;
+    --accent-foreground: 210 25% 96%;
+
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 210 25% 96%;
+
+    --border: 220 10% 22%;
+    --input: 220 12% 19%;
+    --ring: 200 95% 55%;
     --radius: 0.5rem;
 
-    /* VU meter zone colors (IEC-style: green to -20 dB, yellow to -9 dB, red
-     * thereafter). Phase 3 will refine the broader palette; these locked-in
-     * values are referenced directly by vu-meter.tsx via getComputedStyle. */
+    /* Surface tiers — finer-grained than card vs muted vs accent */
+    --surface-1: 220 16% 11%;
+    --surface-2: 220 14% 15%;
+    --surface-3: 220 12% 19%;
+    --border-strong: 220 10% 30%;
+    --fg-subtle: 220 8% 50%;
+
+    /* Semantic state colors — each output gets its own hue */
+    --state-live: 0 75% 55%;
+    --state-record: 350 75% 55%;
+    --state-replay: 45 95% 55%;
+    --state-vcam: 260 70% 65%;
+    --state-preview: 145 60% 50%;
+    --state-warn: 30 95% 55%;
+    --state-bad: 0 85% 55%;
+    --state-ok: 145 50% 45%;
+
+    /* VU meter zones — IEC breakpoints. Values are read by vu-meter.tsx via
+     * getComputedStyle so retoning here updates the meter immediately. */
     --vu-green: 145 65% 45%;
     --vu-yellow: 45 95% 55%;
     --vu-red: 0 75% 55%;
-    --vu-track: 220 14% 88%;
+    --vu-track: 220 14% 14%;
   }
 
+  /* .dark mirrors :root — explicit so any toggling logic remains a no-op
+   * rather than reverting to a non-existent light theme. */
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --background: 220 18% 8%;
+    --foreground: 210 25% 96%;
+    --card: 220 16% 11%;
+    --card-foreground: 210 25% 96%;
+    --popover: 220 16% 11%;
+    --popover-foreground: 210 25% 96%;
+    --primary: 200 95% 55%;
+    --primary-foreground: 220 30% 8%;
+    --secondary: 220 14% 15%;
+    --secondary-foreground: 210 25% 96%;
+    --muted: 220 14% 15%;
+    --muted-foreground: 220 10% 65%;
+    --accent: 220 14% 15%;
+    --accent-foreground: 210 25% 96%;
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 210 25% 96%;
+    --border: 220 10% 22%;
+    --input: 220 12% 19%;
+    --ring: 200 95% 55%;
+
+    --surface-1: 220 16% 11%;
+    --surface-2: 220 14% 15%;
+    --surface-3: 220 12% 19%;
+    --border-strong: 220 10% 30%;
+    --fg-subtle: 220 8% 50%;
+
+    --state-live: 0 75% 55%;
+    --state-record: 350 75% 55%;
+    --state-replay: 45 95% 55%;
+    --state-vcam: 260 70% 65%;
+    --state-preview: 145 60% 50%;
+    --state-warn: 30 95% 55%;
+    --state-bad: 0 85% 55%;
+    --state-ok: 145 50% 45%;
 
     --vu-green: 145 65% 45%;
     --vu-yellow: 45 95% 55%;
@@ -57,6 +112,10 @@
     --vu-track: 220 14% 14%;
   }
 
-  * { @apply border-border; }
-  body { @apply bg-background text-foreground; }
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
 }
