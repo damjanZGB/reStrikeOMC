@@ -1,32 +1,24 @@
 # reStrikeOMC — Session Handoff
 
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-06
 **Branch:** `master`
-**Last commit:** `2cadbb7 feat(web): Canvas-based VU meter with IEC dB zones and peak hold`
+**Last commit:** `ec9b3b4 feat(web): dark studio theme + semantic state colors`
 
 ---
 
 ## Resume here (next session)
 
-### 1. Verify Phase 1 + Phase 2 visually against the real LAN
+### Visual verification of all three phases against the real LAN
 
-This is the gate before starting Phase 3. The dev server should already be running
-(see [Run the app](#run-the-app)). Open http://localhost:5173 against actual OBS
-instances on the LAN and confirm:
+All three phases of the audio/visual refresh have shipped. Verification has
+not yet been done against real OBS instances. Open http://localhost:5173
+(see [Run the app](#run-the-app)) and confirm the items in the
+[Verification checklist](#verification-checklist) below.
 
-- **Phase 1 (data accuracy)** — mute states and volumes match the real OBS
-  state on each instance, both at first paint and after live changes (toggle a
-  mute or move a fader in OBS itself, dashboard updates within ~33 ms).
-- **Phase 2 (VU meters)** — thin colored bar appears below each volume slider,
-  green up to -20 dB, yellow to -9 dB, red above. Peak-hold line lingers and
-  decays. Muted inputs render at 30% opacity. No-data inputs show track only.
-
-If anything's off, fix it before Phase 3 — theming on top of broken data is wasted work.
-
-### 2. Then execute Phase 3 — dark studio theme
-
-The proposal is approved (see [Phase 3 spec](#phase-3-spec) below).
-This is one commit covering the token palette + minimal component application.
+If anything's off, file a follow-up. Otherwise the audio/visual refresh is
+complete and the next pieces of work are tasks #62 (Playwright dashboard
+test against primed mock) and #63 (Opt-in real-OBS integration test) — both
+were always part of the broader test-coverage track, not blocking.
 
 ---
 
@@ -47,7 +39,32 @@ at rest in SQLite via PBKDF2-derived AES key.
 |---|---|---|
 | 1 — Audio data pipeline accuracy fix (4 bugs) | ✅ shipped, awaiting visual verification | `e07e9ce` |
 | 2 — VU meter component (Canvas + rAF + dB zones) | ✅ shipped, awaiting visual verification | `2cadbb7` |
-| 3 — Dark studio theme + semantic state colors | ⏳ approved, not started | — |
+| 3 — Dark studio theme + semantic state colors | ✅ shipped, awaiting visual verification | `ec9b3b4` |
+
+## Verification checklist
+
+Open http://localhost:5173 against real OBS instances on the LAN.
+
+**Phase 1 — accuracy**
+- [ ] Mute states match the real OBS state per instance (first paint + after toggle in OBS).
+- [ ] Volume sliders + dB readouts match OBS (e.g. -6 dB shows "50% · −6.0 dB").
+- [ ] Multi-input setups show all visible audio sources (not just default Mic).
+- [ ] Live changes propagate within ~33 ms (move a fader in OBS, dashboard tracks it).
+
+**Phase 2 — VU meters**
+- [ ] Thin bar (~6 px) below each volume slider when audio is playing.
+- [ ] Green up to -20 dB, yellow to -9 dB, red above.
+- [ ] Peak-hold line lingers ~1.2 s and decays.
+- [ ] Muted inputs render at 30% opacity.
+- [ ] Stereo inputs show two stacked bars with 1 px gap.
+
+**Phase 3 — theme**
+- [ ] App background is deep blue-black, not pure black or white.
+- [ ] Tile cards have 2 px left-edge accent stripe colored by state.
+- [ ] Status dot in tile header pulses when live or recording.
+- [ ] STREAM/REC/REPLAY/VCAM badges are colored when active, dim when off.
+- [ ] Connection status text (connected/connecting/auth_failed) uses semantic colors.
+- [ ] No remaining `text-green-600` or `text-amber-600` flat-color flashes.
 
 ### Phase 1 recap — what shipped
 
@@ -72,6 +89,44 @@ Mock-server (`apps/api/src/obs/mock-server.ts`): added `setInputMute` /
 
 Tests: `apps/api/src/obs/audio-scenarios.test.ts` — 4 user-scenario tests
 pinning each bug. Full api suite: 100 passing (was 96).
+
+### Phase 3 recap — what shipped
+
+Commit `ec9b3b4`. Dark studio palette + semantic state colors.
+
+**Tokens** in `apps/web/src/globals.css`:
+- Surfaces: `--background` (220 18% 8%), `--card` (220 16% 11%), plus aliases
+  `--surface-1..3` for finer hierarchy.
+- Text: `--foreground` (210 25% 96%), `--muted-foreground` (220 10% 65%),
+  new `--fg-subtle` (220 8% 50%).
+- Primary: cyan (200 95% 55%) — broadcast/signal accent.
+- Semantic state (`--state-*`): live (red), record (magenta), replay (amber),
+  vcam (purple), preview (green), warn (orange), bad (red), ok (subtle green).
+- VU zones (`--vu-*`) — unchanged from Phase 2.
+
+App is dark-by-default: `<html class="dark">` in `index.html`, and `:root`
+carries identical tokens to `.dark` so a missing class doesn't flash light.
+
+**Tailwind extension** in `apps/web/tailwind.config.js`: exposes the new
+tokens as named utilities (`bg-surface-1`, `text-fg-subtle`, `bg-state-live`,
+`text-state-ok`, etc.).
+
+**New code**:
+- `apps/web/src/lib/tile-state.ts` — `getTileStateColor(live)` priority
+  function (11 vitest cases pinning live > record > replay > vcam > preview
+  > ok / connecting → warn / auth_failed → bad / disconnected → subtle).
+- `apps/web/src/components/status-dot.tsx` — small colored dot, pulses for
+  live/record, reads `--state-*` via inline style.
+
+**Component changes**:
+- `dashboard.tsx`: tile gets 2 px left-edge stripe colored by state. StatusDot
+  in header. Four `OutputBadge` components (STREAM/REC/REPLAY/VCAM) replace
+  the emoji indicators, pulsing for live + record. Four hardcoded
+  `text-green-600/text-amber-600` → semantic `text-state-*`.
+- `connections.tsx`: 2 hardcoded colors → semantic on the test-connection
+  result.
+
+Web test suite: 33 → 44 passing.
 
 ### Phase 2 recap — what shipped
 
@@ -100,7 +155,7 @@ Volume readout next to each fader now shows percent **and** dB
 
 ---
 
-## Phase 3 spec
+## Phase 3 spec (historical, now shipped)
 
 **Goal:** dark-first studio aesthetic, semantic state colors,
 2 px tile accent stripe + status dot. Light theme out of scope.
@@ -210,24 +265,22 @@ pnpm bundle       # produce portable Desktop bundle (dist-bundle/)
 |---|---|---|
 | #62 | pending | Playwright dashboard test against primed mock |
 | #63 | pending | Opt-in real-OBS integration test (gated on `RESTRIKE_REAL_OBS_HOST`) |
-| #65 | pending | Theming proposal — superseded by Phase 3 (this doc) |
-| #68 | pending | Phase 3: Dark studio theme + semantic state colors |
 
-Tasks #60, #61, #64, #66, #67 are completed.
+Tasks #60, #61, #64, #65, #66, #67, #68 are completed.
 
 ---
 
 ## Recent commits
 
 ```
+ec9b3b4 feat(web): dark studio theme + semantic state colors
+6e796e4 docs: add handoff.md for session-to-session continuity
 2cadbb7 feat(web): Canvas-based VU meter with IEC dB zones and peak hold
 e07e9ce fix(state,obs): correct audio pipeline — mute, volume, and meters
 663db22 test(obs): realistic-OBS scenario fixtures + 6 output-state regression tests
 ee453e6 chore(dev): autoload api .env and ignore local secrets
 9e5976f fix(state): correct output-state pipeline (initial fetch + per-key merge)
 6945afa feat(api,bundle): defensive boot + diagnostic survival
-0dbeaf5 feat: per-connection lifecycle + edit UI + custom-port discovery
-ca49cf0 fix(web,api): empty-body Content-Type and SPA fallback decorateReply
 ```
 
 ---
@@ -254,6 +307,15 @@ ca49cf0 fix(web,api): empty-body Content-Type and SPA fallback decorateReply
 - `apps/web/src/components/vu-meter.test.ts` — 15 helper tests
 - `apps/web/src/components/audio-mixer.tsx` — integration point
 - `apps/web/src/globals.css` — `--vu-*` CSS vars
+
+### Theme + tile state (Phase 3)
+- `apps/web/src/globals.css` — full token system (surfaces, text, semantic state)
+- `apps/web/tailwind.config.js` — named color utilities for new tokens
+- `apps/web/index.html` — `class="dark"` on `<html>`
+- `apps/web/src/lib/tile-state.ts` — `getTileStateColor` priority function
+- `apps/web/src/lib/tile-state.test.ts` — 11 priority cases
+- `apps/web/src/components/status-dot.tsx` — pulsing colored dot
+- `apps/web/src/pages/dashboard.tsx` — tile stripe, status dot, OutputBadge
 
 ### Realistic-OBS scenarios (Tasks #60, #61)
 - `apps/api/src/obs/scenarios.ts` — composable mock states
