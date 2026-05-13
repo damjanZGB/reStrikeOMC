@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-05-13
 **Branch:** `master`
-**Last commit:** `698b9cc feat(web): protocol selection UI + Settings page`
+**Last commit:** `0e6fd30 fix(obs): harden v4 client against 5 P0 defects surfaced by audit`
 
 ---
 
@@ -107,27 +107,29 @@ test-coverage analyzer) ran against the merged work. Findings ranked by
 severity below — none block the feature shipping but each will eventually
 manifest as a user-visible bug.
 
-**P0 — real defects:**
-1. **Reconnect-while-disconnecting race.** `v4-client.ts:71,335-352` —
-   `primeVcamPoll`'s `await` lets `disconnect()` run between socket-open
-   and `setInterval`; resulting timer is never cleared. `handleClose`
-   also nulls `this.ws` even when a new `connect()` already reassigned
-   it. Fix: gate all async post-await operations on `this.closing` before
-   touching state.
-2. **`SceneItemAdded`/`SceneItemRemoved` events ignored** by the cache
-   maintenance switch. Design called for both; only `ScenesChanged` and
-   `SourceRenamed` are wired. Mid-session item add/remove → stale cache
-   → `SetSceneItemEnabled` fails. `v4-client.ts:206-228`.
-3. **Malformed-JSON frame leaks the pending request.** `handleFrame`
-   returns silently on parse error; pending `message-id` then never
-   resolves until 8 s timeout. `v4-client.ts:175-201`.
-4. **`disconnect` double-rejects pending requests.** `disconnect` drains
-   `pending`, calls `ws.close()`, which can fire `close` synchronously
-   → `handleClose` drains again. Second reject is silent but iteration
-   churn is real. `v4-client.ts:76-96 vs 161`.
-5. **No integration test pinning PATCH-protocol → reconnect under new
-   client.** Settings test asserts only the DB row. A regression in
-   `routes/connections.ts:55-65` ordering would be invisible.
+**P0 — real defects (✅ all 5 fixed in commit `0e6fd30`, 2026-05-13):**
+1. ✅ **Reconnect-while-disconnecting race.** Fixed by binding
+   `handleClose` to its specific WebSocket and bailing when `this.ws`
+   has been reassigned; `primeVcamPoll`/`primeSceneItemCache` also
+   re-check `this.closing` after every await. Pinned by
+   `v4-client.test.ts: "does not leak the vcam poll timer when disconnect
+   runs mid-prime"` + `"survives a connect → disconnect → connect cycle
+   without clobbering ws"`.
+2. ✅ **`SceneItemAdded`/`SceneItemRemoved` events wired into
+   `maintainCachesFromEvent`.** Pinned by the two new tests in the
+   `ObsV4Client — events` describe.
+3. ✅ **Malformed-JSON frames emit `ConnectionError`.** Pending requests
+   still time out at 8 s, but the parse failure now has a forensic
+   trail. Pinned by `"emits ConnectionError when the server sends a
+   malformed JSON frame"`.
+4. ✅ **`handleClose` skips drain when `this.closing` is true.** Pinned
+   by `"does not double-iterate pending on disconnect"`.
+5. ✅ **End-to-end PATCH-protocol → reconnect → v4 wire test.** Added
+   to `settings.test.ts` — switches a connection from v5 to v4 against
+   the appropriate mock and asserts the v4 mock received `SetCurrentScene`
+   (v4 wire vocab), proving the translator is in the path.
+
+api suite: 180 → 187 (+7 hardening tests). No network code touched.
 
 **P1 — latent / narrow trigger:**
 6. Boot-time hydration of v4 rows is untested (`index.ts:110-133`).
