@@ -30,6 +30,47 @@ export interface TranslateRequestCtx {
 const dbToMul = (db: number): number => Math.pow(10, db / 20);
 const mulToDb = (mul: number): number => (mul > 0 ? 20 * Math.log10(mul) : -100);
 
+/**
+ * Convert an unknown value to a finite number. Falls back when the value is
+ * non-numeric, NaN, or Infinity — protects against a misbehaving peer sending
+ * e.g. `"volume": "loud"` from being interpreted as Number("loud") === NaN,
+ * which would then propagate through mulToDb and produce NaN dB readouts.
+ */
+function safeNumber(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Internal commands whose v4 wire response is a bare `{status: 'ok', ...}`
+ * with no payload worth reshaping. The v4 client's `call()` validates against
+ * this set when `translateResponse` returns null — that combination is the
+ * sentinel for "expected null, treat as void". Anything else throws so a
+ * future internal command added to translateRequest without a translateResponse
+ * case fails loudly instead of leaking the raw v4 frame.
+ */
+export const WRITE_COMMANDS = new Set<string>([
+  'SetCurrentProgramScene',
+  'SetCurrentPreviewScene',
+  'SetStudioModeEnabled',
+  'TransitionToProgram',
+  'SetCurrentSceneTransition',
+  'SetCurrentSceneTransitionDuration',
+  'SetSceneItemEnabled',
+  'SetInputMute',
+  'SetInputVolume',
+  'SetInputAudioSyncOffset',
+  'ToggleStream',
+  'ToggleRecord',
+  'ToggleRecordPause',
+  'ToggleReplayBuffer',
+  'SaveReplayBuffer',
+  'ToggleVirtualCam',
+  'TriggerHotkeyByName',
+  'SetCurrentSceneCollection',
+  'SetCurrentProfile',
+]);
+
 export function translateRequest(
   internal: string,
   payload: Record<string, unknown>,
@@ -220,7 +261,7 @@ export function translateResponse(
     case 'GetInputMute':
       return { inputMuted: !!v4.muted };
     case 'GetInputVolume': {
-      const mul = Number(v4.volume ?? 0);
+      const mul = safeNumber(v4.volume, 0);
       return { inputVolumeMul: mul, inputVolumeDb: mulToDb(mul) };
     }
     case 'GetPreviewScene':
@@ -291,7 +332,7 @@ export function translateEvent(v4Event: Record<string, unknown>): TranslatedEven
         },
       };
     case 'SourceVolumeChanged': {
-      const mul = Number(v4Event.volume ?? 0);
+      const mul = safeNumber(v4Event.volume, 0);
       return {
         internal: 'InputVolumeChanged',
         payload: {
@@ -380,22 +421,41 @@ export function translateEvent(v4Event: Record<string, unknown>): TranslatedEven
  * v4 source typeIds for audio-capable inputs. Mirrors what v5 surfaces as
  * audio-capable kinds; conservative — extra types just mean we expose more
  * UI rows, never less.
+ *
+ * Update history:
+ * - 2026-05-13: initial allowlist (Windows / macOS / Linux native + media).
+ * - 2026-05-13: expanded to include NDI, BlackMagic Decklink (both
+ *   `decklink-input` and `decklink_input` spellings used by different
+ *   plugin builds), application-audio capture, and `pulse_default`.
+ *   Without these, `SourceCreated` events for NDI/Decklink/etc. would
+ *   drop silently and the dashboard would never learn about new audio
+ *   inputs added mid-session.
  */
 const AUDIO_KINDS = new Set([
+  // Windows
   'wasapi_input_capture',
   'wasapi_output_capture',
   'wasapi_process_output_capture',
+  'application_audio_capture',
+  'application_audio_output_capture',
+  'dshow_input',
+  // macOS
   'coreaudio_input_capture',
   'coreaudio_output_capture',
+  // Linux
   'pulse_input_capture',
   'pulse_output_capture',
-  'dshow_input',
+  'pulse_default',
   'alsa_input_capture',
   'jack_output_capture',
+  // Plugins / cross-platform
   'audio_line',
   'browser_source',
   'ffmpeg_source',
   'vlc_source',
+  'ndi_source',
+  'decklink-input',
+  'decklink_input',
 ]);
 
 export function isAudioKind(typeId: string): boolean {

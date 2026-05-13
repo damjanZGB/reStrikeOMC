@@ -362,7 +362,53 @@ describe('isAudioKind', () => {
     ['dshow_input', true],
     ['monitor_capture', false],
     ['game_capture', false],
+    // P1-8 allowlist expansion: NDI, BlackMagic (both spellings),
+    // application-audio, and pulse_default were missing pre-2026-05-13.
+    // Adding tests pins them so a future cleanup pass doesn't quietly
+    // shrink the set again.
+    ['ndi_source', true],
+    ['decklink-input', true],
+    ['decklink_input', true],
+    ['application_audio_capture', true],
+    ['application_audio_output_capture', true],
+    ['pulse_default', true],
   ])('%s -> %s', (typeId, expected) => {
     expect(isAudioKind(typeId)).toBe(expected);
+  });
+});
+
+// P1-17: NaN guard. v4 peers occasionally send non-numeric "volume" — the
+// raw Number() coercion would turn that into NaN, which then propagates
+// through mulToDb and gives the dashboard a NaN-dB readout indistinguishable
+// from a real mute. safeNumber falls back to 0 instead.
+describe('translateResponse — NaN safety', () => {
+  it('GetInputVolume coerces non-numeric volume to 0 mul / -100 dB', () => {
+    const out = translateResponse('GetInputVolume', { volume: 'loud' }) as {
+      inputVolumeMul: number;
+      inputVolumeDb: number;
+    };
+    expect(out.inputVolumeMul).toBe(0);
+    expect(out.inputVolumeDb).toBe(-100);
+  });
+
+  it('GetInputVolume coerces NaN to 0', () => {
+    const out = translateResponse('GetInputVolume', { volume: NaN }) as {
+      inputVolumeMul: number;
+    };
+    expect(out.inputVolumeMul).toBe(0);
+  });
+});
+
+describe('translateEvent — NaN safety', () => {
+  it('SourceVolumeChanged coerces non-numeric volume to 0', () => {
+    const out = translateEvent({
+      'update-type': 'SourceVolumeChanged',
+      sourceName: 'Mic',
+      volume: 'broken',
+    });
+    expect(out?.internal).toBe('InputVolumeChanged');
+    const p = out?.payload as { inputVolumeMul: number; inputVolumeDb: number };
+    expect(p.inputVolumeMul).toBe(0);
+    expect(p.inputVolumeDb).toBe(-100);
   });
 });

@@ -344,6 +344,16 @@ describe('ObsV4Client — hardening (P0 fixes)', () => {
     await client.disconnect();
   });
 
+  // P1-7 regression: write commands return undefined (not the raw v4 frame).
+  // SetCurrentProgramScene resolves with undefined, not a v4 response.
+  it('write commands return undefined instead of leaking the raw v4 frame', async () => {
+    const client = new ObsV4Client();
+    await client.connect(url(), undefined, {});
+    const result = await client.call('SetCurrentProgramScene', { sceneName: 'Scene 2' });
+    expect(result).toBeUndefined();
+    await client.disconnect();
+  });
+
   // P0-4 regression: disconnect drained pending; handleClose used to drain
   // them again, causing double Promise.reject. Even though Promise contract
   // makes the second reject a no-op, the iteration churn is real. We assert

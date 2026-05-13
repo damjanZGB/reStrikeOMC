@@ -6,6 +6,7 @@ import {
   translateEvent,
   translateRequest,
   translateResponse,
+  WRITE_COMMANDS,
   type SceneItemLookup,
 } from './v4-translate.js';
 
@@ -131,7 +132,20 @@ export class ObsV4Client implements IObsClient {
 
     const raw = await this.rawV4Call(requestType, translated.v4Type, translated.v4Payload);
     const reshaped = translateResponse(requestType, raw);
-    return reshaped ?? raw;
+    if (reshaped !== null) return reshaped;
+    // P1-7: translateResponse returns null when the v4 response is just
+    // `{status:'ok', message-id}` — i.e. a write command. Validate
+    // against the explicit WRITE_COMMANDS set rather than blindly
+    // returning the raw v4 frame: a future internal command added to
+    // translateRequest without a translateResponse case would otherwise
+    // leak v4-shaped keys (`message-id`, `status`) into callers that
+    // expect v5-shaped responses.
+    if (!WRITE_COMMANDS.has(requestType)) {
+      throw new Error(
+        'v4 response not reshaped for internal command: ' + requestType
+      );
+    }
+    return undefined;
   }
 
   on(event: string, cb: EventCb): void {
