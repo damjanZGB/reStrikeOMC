@@ -1,23 +1,23 @@
-import { OBSWebSocket, EventSubscription } from 'obs-websocket-js';
 import { EventEmitter } from 'node:events';
 import type { ConnectionStatus } from '@restrike/shared';
-
-// EventSubscription.All explicitly EXCLUDES the high-volume InputVolumeMeters
-// flag (1<<16). Without this OR, no level data ever arrives at the client,
-// even though obs-websocket-js will silently swallow the missing subscription
-// without an error. Discovered via obsproject/obs-websocket discussion #1152.
-const EVENT_SUBSCRIPTIONS = EventSubscription.All | EventSubscription.InputVolumeMeters;
+import { createObsClient, type IObsClient, type ObsProtocol } from './clients/index.js';
 
 export interface ConnectionTarget {
   id: string;
   host: string;
   port: number;
   password: string | null;
+  /**
+   * Wire protocol to use for this connection. Defaults to 'v5' when omitted so
+   * callers that haven't been updated yet keep the pre-feature behaviour.
+   */
+  protocol?: ObsProtocol;
 }
 
 interface Slot {
   target: ConnectionTarget;
-  client: OBSWebSocket;
+  protocol: ObsProtocol;
+  client: IObsClient;
   status: ConnectionStatus;
   reconnectTimer: NodeJS.Timeout | null;
   reconnectAttempt: number;
@@ -100,9 +100,11 @@ export class ConnectionManager extends EventEmitter {
 
   async add(target: ConnectionTarget): Promise<void> {
     if (this.slots.has(target.id)) return;
+    const protocol: ObsProtocol = target.protocol ?? 'v5';
     const slot: Slot = {
       target,
-      client: new OBSWebSocket(),
+      protocol,
+      client: createObsClient(protocol),
       status: 'disconnected',
       reconnectTimer: null,
       reconnectAttempt: 0,
@@ -132,8 +134,7 @@ export class ConnectionManager extends EventEmitter {
     });
 
     for (const ev of FORWARDED_EVENTS) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      slot.client.on(ev as any, (eventData: unknown) => {
+      slot.client.on(ev, (eventData: unknown) => {
         this.emit('obsEvent', { connId: slot.target.id, eventType: ev, eventData });
       });
     }
@@ -155,15 +156,23 @@ export class ConnectionManager extends EventEmitter {
     ]);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ok = <T,>(s: PromiseSettledResult<T>): T | null =>
-      s.status === 'fulfilled' ? s.value : null;
+    const ok = <T = any,>(s: PromiseSettledResult<unknown>): T | null =>
+      s.status === 'fulfilled' ? (s.value as T) : null;
 
-    const sceneList = ok(scene);
-    const inputList = ok(input);
-    const streamStatus = ok(stream);
-    const recordStatus = ok(record);
-    const replayStatus = ok(replay);
-    const virtStatus = ok(virt);
+    type SceneListResp = {
+      currentProgramSceneName?: string;
+      currentPreviewSceneName?: string;
+      scenes?: Array<{ sceneName: string; sceneIndex: number }>;
+    };
+    type InputListResp = { inputs?: Array<{ inputName: string; inputKind: string }> };
+    type OutputResp = { outputActive?: boolean; outputDuration?: number; outputPaused?: boolean };
+
+    const sceneList = ok<SceneListResp>(scene);
+    const inputList = ok<InputListResp>(input);
+    const streamStatus = ok<OutputResp>(stream);
+    const recordStatus = ok<OutputResp>(record);
+    const replayStatus = ok<OutputResp>(replay);
+    const virtStatus = ok<OutputResp>(virt);
 
     if (!sceneList && !inputList && !streamStatus && !recordStatus && !replayStatus && !virtStatus) {
       // All six failed — almost certainly not connected; nothing useful to emit.
@@ -175,8 +184,9 @@ export class ConnectionManager extends EventEmitter {
     // absorbs the rejection, and we fall back to defaults for that input.
     // Without this, the dashboard renders every audio source at 100% unmuted
     // regardless of what OBS actually has set.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rawInputs: any[] = inputList?.inputs ?? [];
+    const rawInputs = inputList?.inputs ?? [];
+    type MuteResp = { inputMuted?: boolean };
+    type VolResp = { inputVolumeMul?: number; inputVolumeDb?: number };
     const audioStates = await Promise.allSettled(
       rawInputs.map(async (i) => {
         const name = String(i.inputName);
@@ -184,13 +194,14 @@ export class ConnectionManager extends EventEmitter {
           slot.client.call('GetInputMute', { inputName: name }),
           slot.client.call('GetInputVolume', { inputName: name }),
         ]);
+        const muteVal = mute.status === 'fulfilled' ? (mute.value as MuteResp) : null;
+        const volVal = vol.status === 'fulfilled' ? (vol.value as VolResp) : null;
         return {
           name,
           kind: String(i.inputKind),
-          muted: mute.status === 'fulfilled' ? !!mute.value.inputMuted : false,
-          volumeMul:
-            vol.status === 'fulfilled' ? Number(vol.value.inputVolumeMul) : 1,
-          volumeDb: vol.status === 'fulfilled' ? Number(vol.value.inputVolumeDb) : 0,
+          muted: !!muteVal?.inputMuted,
+          volumeMul: Number(volVal?.inputVolumeMul ?? 1),
+          volumeDb: Number(volVal?.inputVolumeDb ?? 0),
         };
       })
     );
@@ -214,8 +225,7 @@ export class ConnectionManager extends EventEmitter {
       connId: slot.target.id,
       currentProgramScene: sceneList?.currentProgramSceneName ?? null,
       currentPreviewScene: sceneList?.currentPreviewSceneName ?? null,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      scenes: (sceneList?.scenes ?? []).map((s: any) => ({
+      scenes: (sceneList?.scenes ?? []).map((s) => ({
         name: String(s.sceneName),
         index: Number(s.sceneIndex),
       })),
@@ -239,10 +249,7 @@ export class ConnectionManager extends EventEmitter {
   private async openOnce(slot: Slot): Promise<void> {
     const url = `ws://${slot.target.host}:${slot.target.port}`;
     try {
-      await slot.client.connect(url, slot.target.password ?? undefined, {
-        eventSubscriptions: EVENT_SUBSCRIPTIONS,
-        rpcVersion: 1,
-      });
+      await slot.client.connect(url, slot.target.password ?? undefined, {});
     } catch (err) {
       const code = (err as { code?: number }).code;
       if (code === 4009) {
@@ -311,8 +318,7 @@ export class ConnectionManager extends EventEmitter {
     if (slot.status !== 'connected') {
       throw new Error(`conn ${connId} not connected (status=${slot.status})`);
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return slot.client.call(requestType as any, requestData as any);
+    return slot.client.call(requestType, requestData);
   }
 
   async remove(id: string): Promise<void> {
