@@ -66,7 +66,10 @@ export class ObsV4Client implements IObsClient {
     // re-connected this.ws. The handler now compares its captured socket
     // against the current this.ws and bails when they differ.
     ws.on('close', () => this.handleClose(ws));
-    ws.on('error', () => this.emitLifecycle('ConnectionError'));
+    // P1-9: forward the underlying ws error so the manager has something
+    // to log. Without the payload, all the operator sees is the empty
+    // ConnectionError event.
+    ws.on('error', (err: Error) => this.emitLifecycle('ConnectionError', err));
 
     await this.runAuth(password);
 
@@ -148,16 +151,21 @@ export class ObsV4Client implements IObsClient {
     return undefined;
   }
 
-  on(event: string, cb: EventCb): void {
+  on(event: 'Identified' | 'ConnectionClosed', cb: () => void): void;
+  on(event: 'ConnectionError', cb: (err?: Error) => void): void;
+  on(event: string, cb: (data: unknown) => void): void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on(event: string, cb: (...args: any[]) => void): void {
     const arr = this.listeners.get(event) ?? [];
-    arr.push(cb);
+    arr.push(cb as EventCb);
     this.listeners.set(event, arr);
   }
 
-  off(event: string, cb: EventCb): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  off(event: string, cb: (...args: any[]) => void): void {
     const arr = this.listeners.get(event);
     if (!arr) return;
-    const idx = arr.indexOf(cb);
+    const idx = arr.indexOf(cb as EventCb);
     if (idx >= 0) arr.splice(idx, 1);
   }
 
@@ -173,8 +181,16 @@ export class ObsV4Client implements IObsClient {
     }
   }
 
-  private emitLifecycle(event: 'Identified' | 'ConnectionClosed' | 'ConnectionError'): void {
-    this.emit(event);
+  /**
+   * P1-9: lifecycle events accept an optional Error so ConnectionError
+   * carries forensic detail to listeners. Identified/ConnectionClosed
+   * ignore the argument.
+   */
+  private emitLifecycle(
+    event: 'Identified' | 'ConnectionClosed' | 'ConnectionError',
+    err?: Error
+  ): void {
+    this.emit(event, err);
   }
 
   private handleClose(socket: WebSocket): void {
@@ -214,7 +230,7 @@ export class ObsV4Client implements IObsClient {
       // for this frame still times out at 8s, but at least now it's not
       // silent — the manager logs the error and the symptom isn't an
       // opaque "v4 request timed out: <type>" 8 seconds after the fact.
-      this.emitLifecycle('ConnectionError');
+      this.emitLifecycle('ConnectionError', new Error('malformed v4 frame'));
       return;
     }
     if (isV4Event(frame)) {
@@ -329,12 +345,7 @@ export class ObsV4Client implements IObsClient {
   }
 
   private async runAuth(password: string | undefined): Promise<void> {
-    let resp: Record<string, unknown>;
-    try {
-      resp = await this.rawV4Call('GetAuthRequired', 'GetAuthRequired', {});
-    } catch (err) {
-      throw err as Error;
-    }
+    const resp = await this.rawV4Call('GetAuthRequired', 'GetAuthRequired', {});
     if (!resp.authRequired) return;
     if (!password) {
       throw new AuthFailedError('authentication required but no password provided');
@@ -345,12 +356,14 @@ export class ObsV4Client implements IObsClient {
     try {
       await this.rawV4Call('Authenticate', 'Authenticate', { auth });
     } catch (err) {
-      const msg = (err as Error).message ?? '';
-      // v4 servers return error="Authentication Failed." on bad credentials.
-      if (/auth/i.test(msg)) {
-        throw new AuthFailedError(msg);
-      }
-      throw err as Error;
+      // P1-10: any error response to Authenticate means the credentials
+      // were rejected. v4 has no numeric code we can pivot on (only an
+      // `error` string field) — pre-fix this used a /auth/i regex against
+      // the message, which broke on non-English OBS server locales.
+      // Since the request-type is fixed, the failure reason is also
+      // fixed: bad credentials. Always surface AuthFailedError so the
+      // route handler's `err instanceof AuthFailedError` path triggers.
+      throw new AuthFailedError((err as Error).message ?? 'authentication failed');
     }
   }
 

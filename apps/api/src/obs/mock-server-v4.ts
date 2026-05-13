@@ -10,6 +10,12 @@ import { isAudioKind } from './clients/v4-translate.js';
 
 export interface MockV4Opts {
   password: string | null;
+  /**
+   * Override the error string sent on failed Authenticate. Used by tests
+   * to simulate non-English OBS server locales — proves the v4 client's
+   * AuthFailedError detection isn't message-string-dependent.
+   */
+  authFailedMessage?: string;
 }
 
 export interface V4Source {
@@ -134,7 +140,13 @@ export async function startMockObsV4(opts: MockV4Opts): Promise<MockV4Handle> {
         const expected = (ws as WebSocket & { __expected?: string }).__expected;
         const provided = String(msg.auth ?? '');
         if (!expected || expected !== provided) {
-          return reply(ws, messageId, false, {}, 'Authentication Failed.');
+          return reply(
+            ws,
+            messageId,
+            false,
+            {},
+            opts.authFailedMessage ?? 'Authentication Failed.'
+          );
         }
         authState.authed = true;
         return reply(ws, messageId, true);

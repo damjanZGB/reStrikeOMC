@@ -49,6 +49,20 @@ describe('ObsV4Client — lifecycle', () => {
     await expect(client.connect(url(), undefined, {})).rejects.toBeInstanceOf(AuthFailedError);
   });
 
+  // P1-10: locale-agnostic auth detection. Pre-fix code used /auth/i to
+  // detect AuthFailedError; a non-English error message would have fallen
+  // through as a generic Error. With the new behaviour, ANY Authenticate
+  // rejection yields AuthFailedError regardless of error-string contents.
+  it('classifies non-English auth failure as AuthFailedError', async () => {
+    await mock.close();
+    mock = await startMockObsV4({
+      password: 'right',
+      authFailedMessage: 'Operación no autorizada',
+    });
+    const client = new ObsV4Client();
+    await expect(client.connect(url(), 'wrong', {})).rejects.toBeInstanceOf(AuthFailedError);
+  });
+
   it('emits ConnectionClosed when the server drops the socket', async () => {
     const client = new ObsV4Client();
     let closed = false;
@@ -327,18 +341,20 @@ describe('ObsV4Client — hardening (P0 fixes)', () => {
     await client.disconnect();
   });
 
-  // P0-3 regression: malformed JSON must surface as ConnectionError. Pending
-  // requests still time out at 8s, but observability is now non-zero.
-  it('emits ConnectionError when the server sends a malformed JSON frame', async () => {
+  // P0-3 + P1-9 regression: malformed JSON must surface as ConnectionError
+  // with an Error payload describing what went wrong. Pending requests
+  // still time out at 8s, but the parse failure now has a forensic trail.
+  it('emits ConnectionError with an Error payload on malformed JSON frame', async () => {
     const client = new ObsV4Client();
-    let errorFired = false;
-    client.on('ConnectionError', () => {
-      errorFired = true;
+    let seenError: Error | undefined | null = null;
+    client.on('ConnectionError', (err) => {
+      seenError = err ?? new Error('error event without payload');
     });
     await client.connect(url(), undefined, {});
     mock.sendRaw('{this is not valid json');
     await new Promise((r) => setTimeout(r, 30));
-    expect(errorFired).toBe(true);
+    expect(seenError).toBeInstanceOf(Error);
+    expect((seenError as unknown as Error).message).toMatch(/malformed v4 frame/);
     // Connection is still usable for valid frames.
     await client.call('SetCurrentProgramScene', { sceneName: 'Scene 2' });
     await client.disconnect();

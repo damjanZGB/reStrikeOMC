@@ -22,6 +22,12 @@ export interface ConnectOpts {
 /**
  * Lifecycle events emitted by every client implementation. These mirror the
  * names obs-websocket-js exposes so the manager handles both paths uniformly.
+ *
+ * `Identified` and `ConnectionClosed` have no payload. `ConnectionError`
+ * carries an optional Error so the manager can log what actually went
+ * wrong — both adapters now supply one (P1-9: previously v4 emitted
+ * payload-less while v5 passed obs-websocket-js's Error through, an
+ * asymmetric surface).
  */
 export type LifecycleEvent = 'Identified' | 'ConnectionClosed' | 'ConnectionError';
 
@@ -30,7 +36,8 @@ export interface IObsClient {
   disconnect(): Promise<void>;
   /** Internal (v5-vocab) command name. v4 client translates inward. */
   call(requestType: string, payload?: Record<string, unknown>): Promise<unknown>;
-  on(event: LifecycleEvent, cb: () => void): void;
+  on(event: 'Identified' | 'ConnectionClosed', cb: () => void): void;
+  on(event: 'ConnectionError', cb: (err?: Error) => void): void;
   on(event: string, cb: (data: unknown) => void): void;
   off?(event: string, cb: (data: unknown) => void): void;
 }
