@@ -59,7 +59,12 @@ export class ObsV4Client implements IObsClient {
     });
 
     ws.on('message', (raw) => this.handleFrame(raw));
-    ws.on('close', () => this.handleClose());
+    // P0-1: bind the close handler to *this specific* WebSocket. Without
+    // the binding, a deferred 'close' event from a previously-disconnected
+    // socket would still reach handleClose() and clobber the freshly
+    // re-connected this.ws. The handler now compares its captured socket
+    // against the current this.ws and bails when they differ.
+    ws.on('close', () => this.handleClose(ws));
     ws.on('error', () => this.emitLifecycle('ConnectionError'));
 
     await this.runAuth(password);
@@ -158,18 +163,30 @@ export class ObsV4Client implements IObsClient {
     this.emit(event);
   }
 
-  private handleClose(): void {
-    if (this.vcamPollTimer) {
+  private handleClose(socket: WebSocket): void {
+    // P0-1: bail when this close event belongs to an *old* socket that was
+    // already replaced by a subsequent connect(). this.ws now points at the
+    // new socket and the rest of this handler would otherwise null it out
+    // and drain the new socket's pending requests.
+    const isCurrent = this.ws === socket;
+    if (this.vcamPollTimer && isCurrent) {
       clearInterval(this.vcamPollTimer);
       this.vcamPollTimer = null;
     }
-    for (const p of this.pending.values()) {
-      clearTimeout(p.timer);
-      p.reject(new Error('connection closed'));
+    if (!isCurrent) return;
+    // P0-4: skip the drain when disconnect() is already running. disconnect()
+    // synchronously rejects every pending entry then calls ws.close() — the
+    // resulting 'close' event re-enters here, and we'd iterate the (already
+    // cleared) map a second time, churning through stale Promise rejects.
+    if (!this.closing) {
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(new Error('connection closed'));
+      }
+      this.pending.clear();
+      this.ws = null;
+      this.emitLifecycle('ConnectionClosed');
     }
-    this.pending.clear();
-    this.ws = null;
-    if (!this.closing) this.emitLifecycle('ConnectionClosed');
   }
 
   private handleFrame(raw: unknown): void {
@@ -178,6 +195,12 @@ export class ObsV4Client implements IObsClient {
       const text = typeof raw === 'string' ? raw : (raw as Buffer).toString('utf-8');
       frame = JSON.parse(text) as V4Frame;
     } catch {
+      // P0-3: surface parse failures as a lifecycle ConnectionError so the
+      // operator has a forensic trail. The pending request (if any) waiting
+      // for this frame still times out at 8s, but at least now it's not
+      // silent — the manager logs the error and the symptom isn't an
+      // opaque "v4 request timed out: <type>" 8 seconds after the fact.
+      this.emitLifecycle('ConnectionError');
       return;
     }
     if (isV4Event(frame)) {
@@ -226,6 +249,28 @@ export class ObsV4Client implements IObsClient {
         // window is tiny and SetSceneItemEnabled has a refresh-on-miss path.
         void this.primeSceneItemCache();
         break;
+      case 'SceneItemAdded': {
+        // P0-2: design called for this; was missing. Without it, a freshly
+        // added item is invisible to SetSceneItemEnabled until either a
+        // ScenesChanged event arrives (rare) or the refresh-on-miss path
+        // triggers a round-trip per call.
+        const sceneName = String(v4Event['scene-name'] ?? '');
+        if (!sceneName) return;
+        void this.refreshSceneItemsFor(sceneName);
+        break;
+      }
+      case 'SceneItemRemoved': {
+        // P0-2: drop the removed entry by id. v4's SceneItemRemoved carries
+        // `scene-name` and `item-id`. Without this, the cache holds a stale
+        // {id → name} that points at a non-existent item; SetSceneItemEnabled
+        // would then send a v4 request that always errors with "item not
+        // found" even though the cache claims it exists.
+        const sceneName = String(v4Event['scene-name'] ?? '');
+        const itemId = Number(v4Event['item-id'] ?? -1);
+        if (!sceneName || itemId < 0) return;
+        this.sceneItems.get(sceneName)?.delete(itemId);
+        break;
+      }
       case 'SourceRenamed': {
         const oldName = String(v4Event.previousName ?? '');
         const newName = String(v4Event.newName ?? '');
@@ -296,13 +341,19 @@ export class ObsV4Client implements IObsClient {
   }
 
   private async primeSceneItemCache(): Promise<void> {
+    // P0-1: bail when disconnect() ran between primeVcamPoll's await and
+    // here. Without this, the cache is repopulated against a dead socket
+    // and the subsequent setInterval (for vcam) leaks past disconnect.
+    if (this.closing) return;
     try {
       const sceneList = await this.rawV4Call('GetSceneList', 'GetSceneList', {});
+      if (this.closing) return;
       type V4Scene = { name: string };
       const scenes = (sceneList.scenes as V4Scene[] | undefined) ?? [];
       this.sceneItems.clear();
       await Promise.allSettled(
         scenes.map(async (s) => {
+          if (this.closing) return;
           await this.refreshSceneItemsFor(s.name);
         })
       );
@@ -336,14 +387,21 @@ export class ObsV4Client implements IObsClient {
   /**
    * Gap-3 fix: v4 has no VirtualcamStateChanged event. Poll every 5s and
    * emit a synthesized event only when the value flips.
+   *
+   * P0-1: the GetVirtualCamStatus await opens a race window during which
+   * disconnect() might run. We must re-check this.closing both before AND
+   * after that await — otherwise setInterval registers a timer that
+   * outlives the connection's socket, churning RPC rejections every 5s.
    */
   private async primeVcamPoll(): Promise<void> {
+    if (this.closing) return;
     try {
       const r = await this.rawV4Call('GetVirtualCamStatus', 'GetVirtualCamStatus', {});
       this.vcamActive = !!r.isVirtualCam || !!r['virtualcam-active'];
     } catch {
       this.vcamActive = false;
     }
+    if (this.closing) return;
     this.vcamPollTimer = setInterval(() => {
       void this.pollVcamOnce();
     }, VCAM_POLL_INTERVAL_MS);

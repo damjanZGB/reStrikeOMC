@@ -39,6 +39,9 @@ export interface MockV4Handle {
   emitEvent: (updateType: string, payload?: Record<string, unknown>) => void;
   /** Forces a synthetic VirtualcamStateChanged value flip for poll testing. */
   flipVcam: () => void;
+  /** Send an arbitrary text frame to all connected clients. Used by tests
+   *  to exercise malformed-JSON handling in the client. */
+  sendRaw: (text: string) => void;
   receivedRequests: Array<{ requestType: string; payload: Record<string, unknown> }>;
 }
 
@@ -300,6 +303,9 @@ export async function startMockObsV4(opts: MockV4Opts): Promise<MockV4Handle> {
     },
     flipVcam() {
       outputs = { ...outputs, virtualCam: !outputs.virtualCam };
+    },
+    sendRaw(text) {
+      for (const c of clients) c.send(text);
     },
     receivedRequests,
   };

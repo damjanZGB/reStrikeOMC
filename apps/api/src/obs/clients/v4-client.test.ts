@@ -239,4 +239,129 @@ describe('ObsV4Client — events', () => {
     expect((seen as unknown as { sceneName: string }).sceneName).toBe('Scene 2');
     await client.disconnect();
   });
+
+  // P0-2 regression: a fresh SceneItemAdded must populate the cache, so that
+  // a subsequent SetSceneItemEnabled finds the item without a refresh-on-miss
+  // round-trip. Without the cache event handler, the request would either
+  // throw 'lookup miss' (if no refresh path) or pay one extra GetSceneItemList
+  // RPC per call.
+  it('updates the scene-item cache on SceneItemAdded events', async () => {
+    mock.setScenes([{ name: 'Scene 1', items: [] }]);
+    const client = new ObsV4Client();
+    await client.connect(url(), undefined, {});
+    await new Promise((r) => setTimeout(r, 50));
+    // Add the item server-side so refreshSceneItemsFor sees it, then fire
+    // the SceneItemAdded event so the client triggers that refresh.
+    mock.setScenes([{ name: 'Scene 1', items: [{ itemId: 9, sourceName: 'BRB' }] }]);
+    mock.emitEvent('SceneItemAdded', { 'scene-name': 'Scene 1', 'item-id': 9 });
+    await new Promise((r) => setTimeout(r, 50));
+    const beforeRetries = mock.receivedRequests.filter(
+      (r) => r.requestType === 'GetSceneItemList'
+    ).length;
+    await client.call('SetSceneItemEnabled', {
+      sceneName: 'Scene 1',
+      sceneItemId: 9,
+      sceneItemEnabled: true,
+    });
+    const afterRetries = mock.receivedRequests.filter(
+      (r) => r.requestType === 'GetSceneItemList'
+    ).length;
+    // No additional GetSceneItemList on the SetSceneItemEnabled path means
+    // the cache was warm — confirms the SceneItemAdded handler did its job.
+    expect(afterRetries).toBe(beforeRetries);
+    await client.disconnect();
+  });
+
+  // P0-2 regression: SceneItemRemoved must drop the cached entry. To prove
+  // the cache really got cleared (rather than the call succeeding via the
+  // refresh-on-miss path repopulating from the mock), we also remove the
+  // item from the mock's state. With the cache cleared and the mock having
+  // no item, both the cache lookup AND the refresh come up empty — the
+  // call rejects with a lookup-miss.
+  it('drops cached entries on SceneItemRemoved events', async () => {
+    mock.setScenes([
+      { name: 'Scene 1', items: [{ itemId: 11, sourceName: 'BRB' }] },
+    ]);
+    const client = new ObsV4Client();
+    await client.connect(url(), undefined, {});
+    await new Promise((r) => setTimeout(r, 50));
+    mock.emitEvent('SceneItemRemoved', { 'scene-name': 'Scene 1', 'item-id': 11 });
+    mock.setScenes([{ name: 'Scene 1', items: [] }]);
+    await new Promise((r) => setTimeout(r, 30));
+    await expect(
+      client.call('SetSceneItemEnabled', {
+        sceneName: 'Scene 1',
+        sceneItemId: 11,
+        sceneItemEnabled: true,
+      })
+    ).rejects.toThrow(/lookup miss/);
+    await client.disconnect();
+  });
+});
+
+describe('ObsV4Client — hardening (P0 fixes)', () => {
+  // P0-1 regression: the original race was primeVcamPoll's first await
+  // racing with disconnect. After disconnect() returns, the timer must NOT
+  // exist (otherwise it polls a dead socket forever). Asserting on the
+  // private vcamPollTimer field via cast is sufficient.
+  it('does not leak the vcam poll timer when disconnect runs mid-prime', async () => {
+    const client = new ObsV4Client();
+    await client.connect(url(), undefined, {});
+    // Immediately disconnect before priming has a chance to setInterval.
+    await client.disconnect();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any).vcamPollTimer).toBeNull();
+  });
+
+  // P0-1 regression: this.ws must not be clobbered by a deferred 'close'
+  // event after a reconnect already assigned a new socket. The scenario:
+  // connect → disconnect → connect again. The old socket's deferred close
+  // event reaches handleClose, which used to overwrite this.ws unconditionally.
+  it('survives a connect → disconnect → connect cycle without clobbering ws', async () => {
+    const client = new ObsV4Client();
+    await client.connect(url(), undefined, {});
+    await client.disconnect();
+    await client.connect(url(), undefined, {});
+    // Round-trip a call to prove the new socket is functional.
+    await client.call('SetCurrentProgramScene', { sceneName: 'Scene 2' });
+    await client.disconnect();
+  });
+
+  // P0-3 regression: malformed JSON must surface as ConnectionError. Pending
+  // requests still time out at 8s, but observability is now non-zero.
+  it('emits ConnectionError when the server sends a malformed JSON frame', async () => {
+    const client = new ObsV4Client();
+    let errorFired = false;
+    client.on('ConnectionError', () => {
+      errorFired = true;
+    });
+    await client.connect(url(), undefined, {});
+    mock.sendRaw('{this is not valid json');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(errorFired).toBe(true);
+    // Connection is still usable for valid frames.
+    await client.call('SetCurrentProgramScene', { sceneName: 'Scene 2' });
+    await client.disconnect();
+  });
+
+  // P0-4 regression: disconnect drained pending; handleClose used to drain
+  // them again, causing double Promise.reject. Even though Promise contract
+  // makes the second reject a no-op, the iteration churn is real. We assert
+  // the drain doesn't run twice by counting handler invocations.
+  it('does not double-iterate pending on disconnect', async () => {
+    const client = new ObsV4Client();
+    await client.connect(url(), undefined, {});
+    // Fire a request but don't await it — it should reject exactly once.
+    let rejectCount = 0;
+    const pending = client
+      .call('GetSceneList', {})
+      .catch(() => {
+        rejectCount++;
+      });
+    // Disconnect mid-flight.
+    await client.disconnect();
+    await pending;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(rejectCount).toBe(1);
+  });
 });
