@@ -1,24 +1,32 @@
 # reStrikeOMC — Session Handoff
 
-**Last updated:** 2026-05-06
+**Last updated:** 2026-05-13
 **Branch:** `master`
-**Last commit:** `ec9b3b4 feat(web): dark studio theme + semantic state colors`
+**Last commit:** `698b9cc feat(web): protocol selection UI + Settings page`
 
 ---
 
 ## Resume here (next session)
 
-### Visual verification of all three phases against the real LAN
+### LAN verification of v4 protocol coexistence (shipped 2026-05-13)
 
-All three phases of the audio/visual refresh have shipped. Verification has
-not yet been done against real OBS instances. Open http://localhost:5173
-(see [Run the app](#run-the-app)) and confirm the items in the
-[Verification checklist](#verification-checklist) below.
+The obs-websocket v4 legacy protocol now ships alongside v5. Verification
+against a real v4 instance has not been done yet:
 
-If anything's off, file a follow-up. Otherwise the audio/visual refresh is
-complete and the next pieces of work are tasks #62 (Playwright dashboard
-test against primed mock) and #63 (Opt-in real-OBS integration test) — both
-were always part of the broader test-coverage track, not blocking.
+- [ ] Connect to an OBS Studio 27.x (or v28+ with the legacy compat plugin)
+      via the Add Connection dialog with protocol set to `v4`.
+- [ ] Mute / unmute an input — the dashboard tile reflects the new state
+      within ~33 ms.
+- [ ] Switch scenes in OBS — `CurrentProgramSceneChanged` propagates.
+- [ ] Start/stop streaming + recording — the badges flip.
+- [ ] Toggle the virtual camera — the badge follows (5 s polling lag is
+      expected; that's a known v4-protocol limitation).
+- [ ] Run "Discover LAN" with the Port field blank — both 4444 and 4455 are
+      probed and results carry the detected protocol badge.
+
+Phase 1–3 audio/visual work from the previous session is also still awaiting
+real-LAN verification — see the original checklist at the bottom of this
+file.
 
 ---
 
@@ -40,6 +48,115 @@ at rest in SQLite via PBKDF2-derived AES key.
 | 1 — Audio data pipeline accuracy fix (4 bugs) | ✅ shipped, awaiting visual verification | `e07e9ce` |
 | 2 — VU meter component (Canvas + rAF + dB zones) | ✅ shipped, awaiting visual verification | `2cadbb7` |
 | 3 — Dark studio theme + semantic state colors | ✅ shipped, awaiting visual verification | `ec9b3b4` |
+| 4 — obs-websocket v4 legacy protocol coexistence | ✅ shipped, awaiting real-v4 verification | `698b9cc` |
+
+### Phase 4 recap — what shipped (v4 protocol)
+
+Hand-rolled v4 client + translation layer + dual-protocol discovery +
+per-connection protocol field + global default setting. Design doc at
+`docs/superpowers/specs/2026-05-13-obs-ws-v4-design.md`.
+
+Six commits (`fae6c9e..698b9cc`):
+
+| Commit | Phase |
+|---|---|
+| `fae6c9e` | design doc |
+| `4420e75` | `IObsClient` interface, manager refactor (no behavior change) |
+| `c0b35fa` | v4 wire client, translation tables, v4 mock |
+| `90b7a17` | migration 002 + protocol field + `app_settings` + settings API |
+| `a56c622` | dual-port discovery + WS handshake protocol detection |
+| `698b9cc` | frontend protocol UI + `/settings` page |
+
+Test counts: api 100 → 180 (+80), shared 17 → 19 (+2), web 44 → 44 (UI
+not yet tested). Total 117 → 243.
+
+Key code:
+- `apps/api/src/obs/clients/types.ts` — `IObsClient`, `AuthFailedError`
+- `apps/api/src/obs/clients/v5-client.ts` — passthrough adapter
+- `apps/api/src/obs/clients/v4-client.ts` — wire protocol + auth +
+  scene-item cache (gap fix #1) + 5s vcam poll (gap fix #3)
+- `apps/api/src/obs/clients/v4-translate.ts` — request/response/event
+  translation, audio-kind filter
+- `apps/api/src/obs/clients/v4-protocol.ts` — frame types + sha256 auth
+- `apps/api/src/obs/mock-server-v4.ts` — v4 mock for tests
+- `apps/api/src/db/migrations/002_v4_protocol.sql` — `protocol` column +
+  `app_settings` table seeded with `defaultProtocol='v5'`
+- `apps/api/src/settings/repo.ts` — `SettingsRepo.resolveProtocol(row)`
+- `apps/api/src/routes/settings.ts` — `GET`/`PUT /api/settings`
+- `apps/api/src/discovery/scan.ts` — `probeWsV5` / `probeWsV4` /
+  `detectProtocol` + dual-port `scanLan`
+- `apps/web/src/components/protocol-badge.tsx` — v4/v5/default pill
+- `apps/web/src/pages/settings.tsx` — global default dropdown
+
+Resolution semantics: `effective = row.protocol ?? settings.defaultProtocol`.
+Resolved in 3 places: POST/PATCH connection routes, `/test`, boot-time
+hydration loop in `index.ts`. **Changing the global default does NOT
+re-resolve already-connected rows** — they keep their existing slot until
+manually reconnected. Documented in Settings page copy.
+
+Accepted v4 limitations: no real-time VU meters (v4 has no
+`InputVolumeMeters` stream; only mute matters per design), no
+`VirtualcamStateChanged` event (synth via 5s poll), `SetSceneItemEnabled`
+requires the per-scene id→name cache populated by snapshot + kept in sync
+by `SceneItemAdded`/`Removed`/`SourceRenamed` events.
+
+### Phase 4 gap punch list (from post-merge reviewer audit, 2026-05-13)
+
+Three review agents (silent-failure hunter, architecture/type review,
+test-coverage analyzer) ran against the merged work. Findings ranked by
+severity below — none block the feature shipping but each will eventually
+manifest as a user-visible bug.
+
+**P0 — real defects:**
+1. **Reconnect-while-disconnecting race.** `v4-client.ts:71,335-352` —
+   `primeVcamPoll`'s `await` lets `disconnect()` run between socket-open
+   and `setInterval`; resulting timer is never cleared. `handleClose`
+   also nulls `this.ws` even when a new `connect()` already reassigned
+   it. Fix: gate all async post-await operations on `this.closing` before
+   touching state.
+2. **`SceneItemAdded`/`SceneItemRemoved` events ignored** by the cache
+   maintenance switch. Design called for both; only `ScenesChanged` and
+   `SourceRenamed` are wired. Mid-session item add/remove → stale cache
+   → `SetSceneItemEnabled` fails. `v4-client.ts:206-228`.
+3. **Malformed-JSON frame leaks the pending request.** `handleFrame`
+   returns silently on parse error; pending `message-id` then never
+   resolves until 8 s timeout. `v4-client.ts:175-201`.
+4. **`disconnect` double-rejects pending requests.** `disconnect` drains
+   `pending`, calls `ws.close()`, which can fire `close` synchronously
+   → `handleClose` drains again. Second reject is silent but iteration
+   churn is real. `v4-client.ts:76-96 vs 161`.
+5. **No integration test pinning PATCH-protocol → reconnect under new
+   client.** Settings test asserts only the DB row. A regression in
+   `routes/connections.ts:55-65` ordering would be invisible.
+
+**P1 — latent / narrow trigger:**
+6. Boot-time hydration of v4 rows is untested (`index.ts:110-133`).
+7. `translateResponse` returns `null` for write commands → caller
+   receives raw v4 frame keys via the `?? raw` fallback in `call()`.
+8. `AUDIO_KINDS` allowlist omits `mac_capture`, NDI, BlackMagic,
+   `pulse_default` — `SourceCreated` events for those drop silently.
+9. Asymmetric error surface: v4 emits payload-less `ConnectionError`;
+   `v5-client.ts` installs no error listener at all.
+10. `runAuth` localization-fragile `/auth/i.test(msg)` heuristic.
+11. No route-level test for `/api/connections/:id/test` against a v4
+    server with auth required.
+
+**P2 — observability + doc:**
+12. Zero logging in any of the v4 files — every `catch {}` is
+    forensically silent.
+13. Global default change doesn't re-resolve live NULL-protocol slots.
+    Documented in UI copy; not pinned by a test.
+14. Dual-port scan branch (no `?port=` param) isn't covered.
+15. `ConnectionManager.call()` against a v4 slot isn't integration-tested.
+16. Zero web tests for `ConnectionsPage` / `SettingsPage` / `ProtocolBadge`.
+17. Numeric coercion edge cases in `translateResponse` (volume=NaN →
+    -100 dB, indistinguishable from mute).
+18. `v4-client.test.ts` reaches into private `pollVcamOnce` via `as any`.
+
+Recommendation: fix P0 items 1, 2, 3, 4 in a follow-up branch
+(`feat/obs-ws-v4-hardening`), add the missing integration tests from
+items 5 + 6 + 11 in the same branch. P1 items 7-10 are worth a second
+branch. P2 are documentation / observability work; can be deferred.
 
 ## Verification checklist
 
