@@ -339,7 +339,11 @@ export async function startMockObs(opts: MockOpts): Promise<MockHandle> {
   return {
     port,
     close: async () => {
-      for (const c of clients) c.close();
+      // terminate() force-kills sockets. close() leaves discovery-probe
+      // half-open upgrades lingering until OS-level TIME_WAIT, blocking
+      // wss.close() indefinitely.
+      for (const c of wss.clients) c.terminate();
+      await new Promise<void>((r) => setImmediate(r));
       await new Promise<void>((res) => wss.close(() => res()));
     },
     changeProgramScene(name) {

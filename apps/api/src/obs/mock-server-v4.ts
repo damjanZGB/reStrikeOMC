@@ -271,7 +271,13 @@ export async function startMockObsV4(opts: MockV4Opts): Promise<MockV4Handle> {
   return {
     port,
     close: async () => {
-      for (const c of clients) c.close();
+      // terminate() force-kills the socket rather than going through the
+      // graceful close-frame negotiation. This matters when discovery
+      // probes left half-open sockets behind: close() would otherwise
+      // block wss.close() indefinitely waiting for those to drain.
+      for (const c of wss.clients) c.terminate();
+      // Yield to let close events propagate before initiating wss.close.
+      await new Promise<void>((r) => setImmediate(r));
       await new Promise<void>((res) => wss.close(() => res()));
     },
     setScenes(s) {
