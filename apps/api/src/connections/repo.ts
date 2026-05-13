@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../db/sqlite.js';
 import { encrypt, decrypt } from '../auth/crypto.js';
-import type { ConnectionConfig, ConnectionInput } from '@restrike/shared';
+import type { ConnectionConfig, ConnectionInput, ObsProtocol } from '@restrike/shared';
 
 interface DbRow {
   id: string;
@@ -10,6 +10,7 @@ interface DbRow {
   port: number;
   password_ciphertext: Buffer | null;
   password_iv: Buffer | null;
+  protocol: string | null;
   created_at: number;
 }
 
@@ -20,8 +21,12 @@ function rowToConfig(row: DbRow): ConnectionConfig {
     host: row.host,
     port: row.port,
     hasPassword: row.password_ciphertext !== null,
+    protocol: (row.protocol as ObsProtocol | null) ?? null,
   };
 }
+
+const SELECT_COLS =
+  'id, name, host, port, password_ciphertext, password_iv, protocol, created_at';
 
 export class ConnectionRepo {
   constructor(private readonly db: Db, private readonly key: Buffer) {}
@@ -38,17 +43,26 @@ export class ConnectionRepo {
     this.db
       .prepare(
         `INSERT INTO connections
-         (id, name, host, port, password_ciphertext, password_iv, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+         (id, name, host, port, password_ciphertext, password_iv, protocol, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(id, input.name, input.host, input.port, ciphertext, iv, Date.now());
+      .run(
+        id,
+        input.name,
+        input.host,
+        input.port,
+        ciphertext,
+        iv,
+        input.protocol ?? null,
+        Date.now()
+      );
     return this.findById(id)!;
   }
 
   list(): ConnectionConfig[] {
     return this.db
       .prepare<[], DbRow>(
-        'SELECT id, name, host, port, password_ciphertext, password_iv, created_at FROM connections ORDER BY created_at ASC'
+        `SELECT ${SELECT_COLS} FROM connections ORDER BY created_at ASC`
       )
       .all()
       .map(rowToConfig);
@@ -57,7 +71,7 @@ export class ConnectionRepo {
   findById(id: string): ConnectionConfig | null {
     const row = this.db
       .prepare<[string], DbRow>(
-        'SELECT id, name, host, port, password_ciphertext, password_iv, created_at FROM connections WHERE id = ?'
+        `SELECT ${SELECT_COLS} FROM connections WHERE id = ?`
       )
       .get(id);
     return row ? rowToConfig(row) : null;
@@ -82,6 +96,10 @@ export class ConnectionRepo {
         fields.push('password_ciphertext = ?', 'password_iv = ?');
         values.push(enc.ciphertext, enc.iv);
       }
+    }
+    if (patch.protocol !== undefined) {
+      fields.push('protocol = ?');
+      values.push(patch.protocol);
     }
     if (fields.length === 0) return existing;
     values.push(id);

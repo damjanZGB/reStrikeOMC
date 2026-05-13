@@ -1,8 +1,8 @@
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import { z } from 'zod';
-import { OBSWebSocket } from 'obs-websocket-js';
-import { ConnectionInputSchema } from '@restrike/shared';
+import { ConnectionInputSchema, ObsProtocolSchema } from '@restrike/shared';
 import { ConnectionRepo } from '../connections/repo.js';
+import { createObsClient, AuthFailedError } from '../obs/clients/index.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -31,6 +31,7 @@ export async function registerConnectionRoutes(
       host: c.host,
       port: c.port,
       password: parsed.data.password ?? null,
+      protocol: server.settings.resolveProtocol(c.protocol),
     });
     return reply.code(201).send(c);
   });
@@ -47,7 +48,7 @@ export async function registerConnectionRoutes(
     // If anything that affects the live socket changed (host, port, password),
     // tear down the existing slot and re-add with the new config. Pure renames
     // skip the cycle so the user doesn't lose connection state for a label edit.
-    const reconnectFields: Array<keyof typeof body.data> = ['host', 'port', 'password'];
+    const reconnectFields: Array<keyof typeof body.data> = ['host', 'port', 'password', 'protocol'];
     const needsReconnect = reconnectFields.some(
       (k) => body.data[k] !== undefined
     );
@@ -59,6 +60,7 @@ export async function registerConnectionRoutes(
         host: updated.host,
         port: updated.port,
         password,
+        protocol: server.settings.resolveProtocol(updated.protocol),
       });
     }
     return updated;
@@ -81,12 +83,14 @@ export async function registerConnectionRoutes(
     const conn = server.connections.findById(params.data.id);
     if (!conn) return reply.code(404).send({ error: 'not_found' });
     const password = server.connections.getPassword(params.data.id);
-    const obs = new OBSWebSocket();
+    const protocol = server.settings.resolveProtocol(conn.protocol);
+    const client = createObsClient(protocol);
     try {
-      await obs.connect(`ws://${conn.host}:${conn.port}`, password ?? undefined);
-      await obs.disconnect();
+      await client.connect(`ws://${conn.host}:${conn.port}`, password ?? undefined, {});
+      await client.disconnect();
       return { status: 'ok' };
     } catch (err) {
+      if (err instanceof AuthFailedError) return { status: 'auth_failed' };
       const code = (err as { code?: number }).code;
       if (code === 4009) return { status: 'auth_failed' };
       return { status: 'unreachable', message: String(err) };
@@ -99,6 +103,7 @@ export const ConnectionPatchSchema = z.object({
   host: z.string().min(1).max(255).optional(),
   port: z.number().int().min(1).max(65535).optional(),
   password: z.string().max(256).optional(),
+  protocol: ObsProtocolSchema.nullable().optional(),
 });
 
 export const ConnectionParams = z.object({ id: z.string().uuid() });

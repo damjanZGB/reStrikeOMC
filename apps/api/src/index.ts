@@ -15,7 +15,9 @@ import { registerDiscoverRoute } from './routes/discover.js';
 import { makeRequireSession } from './auth/middleware.js';
 import { startSessionPurgeTimer } from './auth/purge.js';
 import { ConnectionRepo } from './connections/repo.js';
+import { SettingsRepo } from './settings/repo.js';
 import { registerConnectionRoutes } from './routes/connections.js';
+import { registerSettingsRoutes } from './routes/settings.js';
 import { ConnectionManager } from './obs/connection-manager.js';
 import { WsHub } from './realtime/ws-hub.js';
 import { StateStore } from './state/state-store.js';
@@ -67,6 +69,7 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   const sessions = new SessionRepo(db);
   const passwordKey = deriveKeyFromString(connectionPasswordKey);
   const connections = new ConnectionRepo(db, passwordKey);
+  const settings = new SettingsRepo(db);
   const obsManager = new ConnectionManager();
 
   server.decorate('db', db);
@@ -74,6 +77,7 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
   server.decorate('sessions', sessions);
   server.decorate('passwordKey', passwordKey);
   server.decorate('connections', connections);
+  server.decorate('settings', settings);
   server.decorate('obsManager', obsManager);
 
   const stopPurge = startSessionPurgeTimer(sessions);
@@ -96,6 +100,7 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
 
   await registerConnectionRoutes(server, requireSession);
   await registerDiscoverRoute(server, requireSession);
+  await registerSettingsRoutes(server, requireSession);
 
   // Hydrate the obs-websocket manager from persisted connections so the
   // dashboard sees live state immediately on boot (instead of empty tiles
@@ -106,7 +111,13 @@ export async function buildServer(opts: BuildOptions = {}): Promise<FastifyInsta
     try {
       const password = connections.getPassword(conn.id);
       void obsManager
-        .add({ id: conn.id, host: conn.host, port: conn.port, password })
+        .add({
+          id: conn.id,
+          host: conn.host,
+          port: conn.port,
+          password,
+          protocol: settings.resolveProtocol(conn.protocol),
+        })
         .catch((err) =>
           server.log.error(
             { err, connId: conn.id },
