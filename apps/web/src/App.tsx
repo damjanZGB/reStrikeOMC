@@ -4,6 +4,7 @@ import { LoginPage } from '@/pages/login';
 import { SetupPage } from '@/pages/setup';
 import { ConnectionsPage } from '@/pages/connections';
 import { DashboardPage } from '@/pages/dashboard';
+import { SettingsPage } from '@/pages/settings';
 import { Button } from '@/components/ui/button';
 
 export function App(): JSX.Element {
@@ -38,6 +39,7 @@ export function App(): JSX.Element {
           <nav className="flex gap-4 text-sm font-medium">
             <Link to="/dashboard" className="hover:text-primary">Dashboard</Link>
             <Link to="/connections" className="hover:text-primary">Connections</Link>
+            <Link to="/settings" className="hover:text-primary">Settings</Link>
           </nav>
           <div className="flex items-center gap-3 text-sm">
             <span className="text-muted-foreground">{user.username}</span>
@@ -58,6 +60,7 @@ export function App(): JSX.Element {
         <Routes>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/connections" element={<ConnectionsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>

@@ -1,4 +1,9 @@
-import type { ConnectionConfig, ConnectionInput } from '@restrike/shared';
+import type {
+  AppSettings,
+  ConnectionConfig,
+  ConnectionInput,
+  ObsProtocol,
+} from '@restrike/shared';
 
 async function jsonFetch<T = unknown>(
   input: RequestInfo,
@@ -71,8 +76,14 @@ export const api = {
     ),
   discover: (port?: number) => {
     const qs = port ? `?port=${port}` : '';
-    return jsonFetch<{ hosts: Array<{ host: string; port: number }> }>(
+    return jsonFetch<{ hosts: Array<{ host: string; port: number; protocol: ObsProtocol }> }>(
       `/api/discover${qs}`
     );
   },
+  getSettings: () => jsonFetch<AppSettings>('/api/settings'),
+  setSettings: (patch: AppSettings) =>
+    jsonFetch<void>('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
 };

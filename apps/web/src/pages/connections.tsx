@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ConnectionConfig, ConnectionInput } from '@restrike/shared';
+import type { ConnectionConfig, ConnectionInput, ObsProtocol } from '@restrike/shared';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,15 +17,25 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Trash2, Wifi, Radar, Pencil } from 'lucide-react';
+import { ProtocolBadge } from '@/components/protocol-badge';
+
+type ProtocolChoice = 'default' | ObsProtocol;
 
 interface AddFormState {
   name: string;
   host: string;
   port: string;
   password: string;
+  protocol: ProtocolChoice;
 }
 
-const emptyAdd: AddFormState = { name: '', host: '', port: '4455', password: '' };
+const emptyAdd: AddFormState = {
+  name: '',
+  host: '',
+  port: '4455',
+  password: '',
+  protocol: 'default',
+};
 
 interface EditFormState {
   name: string;
@@ -33,6 +43,7 @@ interface EditFormState {
   port: string;
   password: string;
   clearPassword: boolean;
+  protocol: ProtocolChoice;
 }
 
 function toEditForm(c: ConnectionConfig): EditFormState {
@@ -42,7 +53,12 @@ function toEditForm(c: ConnectionConfig): EditFormState {
     port: String(c.port),
     password: '',
     clearPassword: false,
+    protocol: c.protocol ?? 'default',
   };
+}
+
+function protocolChoiceToValue(c: ProtocolChoice): ObsProtocol | null {
+  return c === 'default' ? null : c;
 }
 
 export function ConnectionsPage(): JSX.Element {
@@ -90,8 +106,10 @@ export function ConnectionsPage(): JSX.Element {
   });
 
   const discover = useMutation({
-    mutationFn: (port: number) => api.discover(port),
+    mutationFn: (port?: number) => api.discover(port),
   });
+
+  const settings = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
 
   return (
     <div className="grid gap-6">
@@ -103,7 +121,10 @@ export function ConnectionsPage(): JSX.Element {
             onOpenChange={(v) => {
               setDiscoverOpen(v);
               if (v && !discover.data) {
-                discover.mutate(Number(discoverPort) || 4455);
+                // Empty port string means "scan both defaults" — let the
+                // server probe 4444 and 4455 in parallel and tag each.
+                const p = discoverPort.trim() === '' ? undefined : Number(discoverPort);
+                discover.mutate(p);
               }
             }}
           >
@@ -117,24 +138,28 @@ export function ConnectionsPage(): JSX.Element {
               <DialogHeader>
                 <DialogTitle>Discover OBS instances</DialogTitle>
                 <DialogDescription>
-                  Scans your local subnet for hosts responding on the given port.
-                  Defaults to OBS-WebSocket's standard 4455 — change it if your
-                  instances use a different port.
+                  Scans your local subnet for OBS instances. Leave Port blank
+                  to probe both 4444 (v4 default) and 4455 (v5 default) at
+                  once — each result is tagged with the detected protocol.
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-2">
-                <Label htmlFor="discover-port">Port</Label>
+                <Label htmlFor="discover-port">Port (optional)</Label>
                 <div className="flex gap-2">
                   <Input
                     id="discover-port"
                     type="number"
                     min={1}
                     max={65535}
+                    placeholder="leave blank to scan 4444 + 4455"
                     value={discoverPort}
                     onChange={(e) => setDiscoverPort(e.target.value)}
                   />
                   <Button
-                    onClick={() => discover.mutate(Number(discoverPort) || 4455)}
+                    onClick={() => {
+                      const p = discoverPort.trim() === '' ? undefined : Number(discoverPort);
+                      discover.mutate(p);
+                    }}
                     disabled={discover.isPending}
                   >
                     {discover.isPending ? 'Scanning...' : 'Scan'}
@@ -161,8 +186,11 @@ export function ConnectionsPage(): JSX.Element {
                       key={`${h.host}:${h.port}`}
                       className="flex items-center justify-between border rounded-md px-3 py-2"
                     >
-                      <span className="font-mono text-sm">
-                        {h.host}:{h.port}
+                      <span className="flex items-center gap-2">
+                        <span className="font-mono text-sm">
+                          {h.host}:{h.port}
+                        </span>
+                        <ProtocolBadge protocol={h.protocol} />
                       </span>
                       <Button
                         size="sm"
@@ -172,6 +200,10 @@ export function ConnectionsPage(): JSX.Element {
                             host: h.host,
                             port: String(h.port),
                             password: '',
+                            // Preselect the detected protocol so the user
+                            // doesn't accidentally inherit a wrong default
+                            // when adding a discovered tile.
+                            protocol: h.protocol,
                           });
                           setDiscoverOpen(false);
                           setAddOpen(true);
@@ -208,6 +240,7 @@ export function ConnectionsPage(): JSX.Element {
                     host: addForm.host,
                     port: Number(addForm.port),
                     password: addForm.password || undefined,
+                    protocol: protocolChoiceToValue(addForm.protocol),
                   });
                 }}
               >
@@ -253,6 +286,26 @@ export function ConnectionsPage(): JSX.Element {
                     }
                   />
                 </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="add-protocol">Protocol</Label>
+                  <select
+                    id="add-protocol"
+                    className="h-9 rounded-md border bg-background px-2 text-sm"
+                    value={addForm.protocol}
+                    onChange={(e) =>
+                      setAddForm({
+                        ...addForm,
+                        protocol: e.target.value as ProtocolChoice,
+                      })
+                    }
+                  >
+                    <option value="default">
+                      Default ({settings.data?.defaultProtocol ?? 'v5'})
+                    </option>
+                    <option value="v5">v5 (modern)</option>
+                    <option value="v4">v4 (legacy)</option>
+                  </select>
+                </div>
                 {create.isError ? (
                   <p className="text-sm text-destructive">
                     {(create.error as Error).message}
@@ -286,6 +339,7 @@ export function ConnectionsPage(): JSX.Element {
               key={c.id}
               conn={c}
               testStatus={testStatus[c.id]}
+              defaultProtocol={settings.data?.defaultProtocol}
               onTest={() => probe.mutate(c.id)}
               onDelete={() => del.mutate(c.id)}
               onEdit={() => {
@@ -330,6 +384,8 @@ export function ConnectionsPage(): JSX.Element {
                 } else if (editForm.password.length > 0) {
                   patch.password = editForm.password;
                 }
+                const newProtocol = protocolChoiceToValue(editForm.protocol);
+                if (newProtocol !== editing.protocol) patch.protocol = newProtocol;
                 update.mutate({ id: editing.id, patch });
               }}
             >
@@ -398,6 +454,30 @@ export function ConnectionsPage(): JSX.Element {
                   </label>
                 ) : null}
               </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-protocol">Protocol</Label>
+                <select
+                  id="edit-protocol"
+                  className="h-9 rounded-md border bg-background px-2 text-sm"
+                  value={editForm.protocol}
+                  onChange={(e) =>
+                    setEditForm({
+                      ...editForm,
+                      protocol: e.target.value as ProtocolChoice,
+                    })
+                  }
+                >
+                  <option value="default">
+                    Default ({settings.data?.defaultProtocol ?? 'v5'})
+                  </option>
+                  <option value="v5">v5 (modern)</option>
+                  <option value="v4">v4 (legacy)</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Changing protocol triggers a reconnect with the new wire
+                  format.
+                </p>
+              </div>
               {update.isError ? (
                 <p className="text-sm text-destructive">
                   {(update.error as Error).message}
@@ -429,12 +509,14 @@ export function ConnectionsPage(): JSX.Element {
 function ConnectionCard({
   conn,
   testStatus,
+  defaultProtocol,
   onTest,
   onDelete,
   onEdit,
 }: {
   conn: ConnectionConfig;
   testStatus: string | undefined;
+  defaultProtocol: ObsProtocol | undefined;
   onTest: () => void;
   onDelete: () => void;
   onEdit: () => void;
@@ -443,7 +525,10 @@ function ConnectionCard({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
-          <span>{conn.name}</span>
+          <span className="flex items-center gap-2">
+            <span>{conn.name}</span>
+            <ProtocolBadge protocol={conn.protocol} resolvedDefault={defaultProtocol} />
+          </span>
           <div className="flex gap-1">
             <Button variant="ghost" size="icon" onClick={onEdit} aria-label="Edit">
               <Pencil className="h-4 w-4" />
