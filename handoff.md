@@ -1,8 +1,8 @@
 # reStrikeOMC — Session Handoff
 
-**Last updated:** 2026-05-13
+**Last updated:** 2026-05-14
 **Branch:** `master`
-**Last commit:** `0e6fd30 fix(obs): harden v4 client against 5 P0 defects surfaced by audit`
+**Last commit:** `26c372a fix(settings): pin global-default propagation semantics (P2-13)`
 
 ---
 
@@ -131,34 +131,54 @@ manifest as a user-visible bug.
 
 api suite: 180 → 187 (+7 hardening tests). No network code touched.
 
-**P1 — latent / narrow trigger:**
-6. Boot-time hydration of v4 rows is untested (`index.ts:110-133`).
-7. `translateResponse` returns `null` for write commands → caller
-   receives raw v4 frame keys via the `?? raw` fallback in `call()`.
-8. `AUDIO_KINDS` allowlist omits `mac_capture`, NDI, BlackMagic,
-   `pulse_default` — `SourceCreated` events for those drop silently.
-9. Asymmetric error surface: v4 emits payload-less `ConnectionError`;
-   `v5-client.ts` installs no error listener at all.
-10. `runAuth` localization-fragile `/auth/i.test(msg)` heuristic.
-11. No route-level test for `/api/connections/:id/test` against a v4
-    server with auth required.
+**P1 — latent / narrow trigger (✅ all 6 fixed in commits `efcc9eb..7a5a191`, 2026-05-14):**
+6. ✅ Boot-time v4 hydration test (new e2e test in `settings.test.ts`
+   that seeds rows via API on one server, closes, builds a fresh server
+   against the same dbPath, asserts both protocols connect).
+7. ✅ Write-command frame leak. `WRITE_COMMANDS` set in `v4-translate.ts`
+   + `v4-client.ts:call()` validator. Future commands without a
+   `translateResponse` case throw loudly instead of silently leaking
+   v4 frame keys.
+8. ✅ `AUDIO_KINDS` expanded to include `ndi_source`, `decklink-input`,
+   `decklink_input`, `application_audio_capture`,
+   `application_audio_output_capture`, `pulse_default`.
+9. ✅ Symmetric error surface. `IObsClient.on('ConnectionError')` now
+   accepts `(err?: Error)`. v4 client supplies the underlying ws error
+   (or a synthetic `'malformed v4 frame'` Error from handleFrame). v5
+   continues to pass through obs-websocket-js's Error.
+10. ✅ `runAuth` no longer regex-matches the error message. ANY rejection
+    from the Authenticate request is now treated as AuthFailedError —
+    works across OBS server locales. Pinned by 'classifies non-English
+    auth failure as AuthFailedError'.
+11. ✅ Route-level v4 auth tests for `/api/connections/:id/test`
+    ('returns ok for a reachable v4 OBS' + 'returns auth_failed for
+    wrong password against v4').
 
-**P2 — observability + doc:**
-12. Zero logging in any of the v4 files — every `catch {}` is
-    forensically silent.
-13. Global default change doesn't re-resolve live NULL-protocol slots.
-    Documented in UI copy; not pinned by a test.
-14. Dual-port scan branch (no `?port=` param) isn't covered.
-15. `ConnectionManager.call()` against a v4 slot isn't integration-tested.
-16. Zero web tests for `ConnectionsPage` / `SettingsPage` / `ProtocolBadge`.
-17. Numeric coercion edge cases in `translateResponse` (volume=NaN →
-    -100 dB, indistinguishable from mute).
-18. `v4-client.test.ts` reaches into private `pollVcamOnce` via `as any`.
+**P2 — observability + doc (✅ all 7 fixed):**
+12. ✅ `ConnectionError` now carries an Error payload uniformly across
+    both protocols. Forensic trail is non-zero at the manager boundary.
+    (Wiring a logger into the manager is a separate, larger architecture
+    change — deferred until there's a concrete observability use case
+    that needs it.)
+13. ✅ Global-default propagation contract pinned. New test asserts that
+    flipping `defaultProtocol` does NOT touch live NULL-protocol slots
+    (no status events, wire stays on original protocol). Settings UI
+    copy + route comment updated to make the contract explicit.
+14. ✅ Dual-port scan covered. `scanLan` gains an optional `ports` array
+    that overrides the default `[4444, 4455]` list — new test asserts
+    both v4 and v5 hosts appear in one result.
+15. ✅ `ConnectionManager.call()` v4 integration test wires manager →
+    v4 client → mock and verifies translation (asserts mock received
+    `SetMute`, not `SetInputMute`).
+16. ✅ Web tests added: `ProtocolBadge` (6 cases), `SettingsPage`
+    (3 cases), new `lib/protocol-choice.ts` helper extracted from
+    `connections.tsx` with 8 unit-test cases.
+17. ✅ NaN guards via `safeNumber` helper. Non-numeric volume coerces
+    to 0 instead of NaN-propagating through `mulToDb`.
+18. ✅ `_testForcePollVcam` wrapper replaces the `as any` private cast.
 
-Recommendation: fix P0 items 1, 2, 3, 4 in a follow-up branch
-(`feat/obs-ws-v4-hardening`), add the missing integration tests from
-items 5 + 6 + 11 in the same branch. P1 items 7-10 are worth a second
-branch. P2 are documentation / observability work; can be deferred.
+Final test counts: api 100 → 204 (+104), web 44 → 61 (+17), shared
+17 → 19 (+2). Total monorepo: 117 → 284 tests passing.
 
 ## Verification checklist
 
