@@ -10,17 +10,21 @@ export interface TestServer {
   close: () => Promise<void>;
 }
 
-export async function buildTestServer(): Promise<TestServer> {
-  const dir = mkdtempSync(join(tmpdir(), 'restrike-'));
+export async function buildTestServer(
+  overrides: { dbPath?: string; cleanupOnClose?: boolean } = {}
+): Promise<TestServer> {
+  const dir = overrides.dbPath ? '' : mkdtempSync(join(tmpdir(), 'restrike-'));
+  const dbPath = overrides.dbPath ?? join(dir, 'test.db');
   const server = await buildServer({
     test: true,
-    dbPath: join(dir, 'test.db'),
+    dbPath,
     sessionSecret: 'a'.repeat(32),
     connectionPasswordKey: 'b'.repeat(32),
   });
+  const cleanup = overrides.cleanupOnClose ?? !overrides.dbPath;
   const close = async () => {
     await server.close();
-    rmSync(dir, { recursive: true, force: true });
+    if (cleanup && dir) rmSync(dir, { recursive: true, force: true });
   };
   return { server, dir, close };
 }

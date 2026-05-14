@@ -9,6 +9,12 @@ export interface DiscoverOpts {
    * (4444) and the v5 default (4455) on every candidate host.
    */
   port?: number;
+  /**
+   * Explicit list of ports to probe. Overrides both `port` and the default
+   * dual-port list. Mostly useful for tests that need to point at mock
+   * servers on dynamic ports.
+   */
+  ports?: number[];
   timeoutMs?: number;
   concurrency?: number;
   cidr?: string;
@@ -162,7 +168,9 @@ export async function detectProtocol(host: string, port: number): Promise<ObsPro
 export async function scanLan(opts: DiscoverOpts = {}): Promise<DiscoveredHost[]> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const concurrency = opts.concurrency ?? DEFAULT_CONCURRENCY;
-  const ports = opts.port !== undefined ? [opts.port] : [V4_DEFAULT_PORT, V5_DEFAULT_PORT];
+  const ports =
+    opts.ports ??
+    (opts.port !== undefined ? [opts.port] : [V4_DEFAULT_PORT, V5_DEFAULT_PORT]);
 
   let hosts: string[] = [];
   if (opts.cidr) {

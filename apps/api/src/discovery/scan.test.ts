@@ -158,4 +158,21 @@ describe('scanLan', () => {
     });
     expect(result).toEqual([]);
   }, 30_000);
+
+  // P2-14: the dual-port branch (no explicit `port`) was uncovered by the
+  // tests above which all pass `port`. The `ports` opt lets us point at
+  // the dynamic mock ports without binding the mocks to the real 4444/4455
+  // defaults. Asserts both v4 and v5 instances appear in one result set.
+  it('returns both v4 and v5 hosts when given a multi-port list', async () => {
+    const result = await scanLan({
+      ports: [mockV4.port, mockV5.port],
+      timeoutMs: 200,
+      concurrency: 16,
+      cidr: '127.0.0.1',
+    });
+    const v5 = result.find((r) => r.port === mockV5.port);
+    const v4 = result.find((r) => r.port === mockV4.port);
+    expect(v5?.protocol).toBe('v5');
+    expect(v4?.protocol).toBe('v4');
+  }, 20_000);
 });

@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { buildTestServer } from '../test-helpers.js';
 import { startMockObs } from '../obs/mock-server.js';
@@ -219,4 +222,190 @@ describe('PATCH /api/connections/:id with new protocol triggers wire-level recon
       await mockV4.close();
     }
   }, 15_000);
+});
+
+// P1-6: prove that persisted v4 rows are correctly hydrated on a fresh
+// server boot. Without this test, a regression in index.ts's hydration
+// loop (e.g. a refactor that resolved protocol before reading the row)
+// would manifest as "all my v4 tiles are silently disconnected after
+// restart". We seed the DB via one buildTestServer call, close it, then
+// build another against the same dbPath and assert both mock-targeted
+// connections reach 'connected'.
+describe('boot-time hydration of mixed v4 + v5 connections (P1-6)', () => {
+  it('reconnects both protocols against their mocks on a fresh server boot', async () => {
+    const mockV5 = await startMockObs({ password: null });
+    const mockV4 = await startMockObsV4({ password: null });
+    const dir = mkdtempSync(join(tmpdir(), 'restrike-hydrate-'));
+    const dbPath = join(dir, 'test.db');
+    let v5Id = '';
+    let v4Id = '';
+    try {
+      // Phase 1: create connections via API on a temporary server.
+      {
+        const { server, close } = await buildTestServer({ dbPath });
+        const cookie = await login(server);
+        const r5 = await server.inject({
+          method: 'POST',
+          url: '/api/connections',
+          headers: { cookie },
+          payload: {
+            name: 'v5-row',
+            host: '127.0.0.1',
+            port: mockV5.port,
+            protocol: 'v5',
+          },
+        });
+        v5Id = r5.json().id as string;
+        const r4 = await server.inject({
+          method: 'POST',
+          url: '/api/connections',
+          headers: { cookie },
+          payload: {
+            name: 'v4-row',
+            host: '127.0.0.1',
+            port: mockV4.port,
+            protocol: 'v4',
+          },
+        });
+        v4Id = r4.json().id as string;
+        await server.obsManager.waitForStatus(v5Id, 'connected', 3000);
+        await server.obsManager.waitForStatus(v4Id, 'connected', 3000);
+        await close();
+      }
+      // Phase 2: spin up a new server against the same DB. The boot
+      // hydration loop must rehydrate both connections from the persisted
+      // rows and reach 'connected' on both.
+      {
+        const { server, close } = await buildTestServer({ dbPath });
+        try {
+          await server.obsManager.waitForStatus(v5Id, 'connected', 5000);
+          await server.obsManager.waitForStatus(v4Id, 'connected', 5000);
+          // Round-trip a call through each to prove the wire actually works.
+          await server.obsManager.call(v5Id, 'SetCurrentProgramScene', {
+            sceneName: 'Scene 2',
+          });
+          await server.obsManager.call(v4Id, 'SetCurrentProgramScene', {
+            sceneName: 'Scene 2',
+          });
+        } finally {
+          await close();
+        }
+      }
+      const sawV4Translation = mockV4.receivedRequests.some(
+        (r) => r.requestType === 'SetCurrentScene'
+      );
+      expect(sawV4Translation).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      await mockV5.close();
+      await mockV4.close();
+    }
+  }, 30_000);
+});
+
+// P1-11: /api/connections/:id/test must route v4 auth failures to the
+// 'auth_failed' branch. The route's error-handling uses
+// `err instanceof AuthFailedError`; refactoring the AuthFailedError
+// location would silently break that detection.
+describe('/api/connections/:id/test against a v4 server (P1-11)', () => {
+  it('returns ok for a reachable v4 OBS', async () => {
+    const mockV4 = await startMockObsV4({ password: null });
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: {
+          name: 'v4-test',
+          host: '127.0.0.1',
+          port: mockV4.port,
+          protocol: 'v4',
+        },
+      });
+      const id = created.json().id as string;
+      const r = await server.inject({
+        method: 'POST',
+        url: `/api/connections/${id}/test`,
+        headers: { cookie },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toMatchObject({ status: 'ok' });
+    } finally {
+      await close();
+      await mockV4.close();
+    }
+  });
+
+  it('returns auth_failed for wrong password against v4', async () => {
+    const mockV4 = await startMockObsV4({ password: 'real' });
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: {
+          name: 'v4-bad-pw',
+          host: '127.0.0.1',
+          port: mockV4.port,
+          password: 'wrong',
+          protocol: 'v4',
+        },
+      });
+      const id = created.json().id as string;
+      const r = await server.inject({
+        method: 'POST',
+        url: `/api/connections/${id}/test`,
+        headers: { cookie },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toMatchObject({ status: 'auth_failed' });
+    } finally {
+      await close();
+      await mockV4.close();
+    }
+  });
+});
+
+// P2-15: integration test for ConnectionManager.call() against a v4 slot.
+// Phase B unit-tested the v4 client end-to-end and Phase E unit-tested the
+// translation pure functions, but no test wires the manager → v4 client
+// → mock chain to verify a v4 slot answers manager-level calls. A
+// regression in createObsClient (e.g. returning v5 client for protocol
+// 'v4') would otherwise ship invisibly.
+describe('ConnectionManager.call() against a v4 slot (P2-15)', () => {
+  it('routes the call through the v4 translator', async () => {
+    const mockV4 = await startMockObsV4({ password: null });
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: {
+          name: 'v4-manager-call',
+          host: '127.0.0.1',
+          port: mockV4.port,
+          protocol: 'v4',
+        },
+      });
+      const id = created.json().id as string;
+      await server.obsManager.waitForStatus(id, 'connected', 3000);
+      await server.obsManager.call(id, 'SetInputMute', {
+        inputName: 'Mic',
+        muted: true,
+      });
+      const sawTranslated = mockV4.receivedRequests.some(
+        (r) => r.requestType === 'SetMute'
+      );
+      expect(sawTranslated).toBe(true);
+    } finally {
+      await close();
+      await mockV4.close();
+    }
+  });
 });

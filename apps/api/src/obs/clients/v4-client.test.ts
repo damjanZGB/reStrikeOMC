@@ -216,8 +216,7 @@ describe('ObsV4Client — virtual cam poll (gap 3)', () => {
     mock.flipVcam();
     // Force a manual poll instead of waiting for the 5s interval. Production
     // code still runs the interval; this just shortens the test loop.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (client as any).pollVcamOnce();
+    await client._testForcePollVcam();
     expect(seen).not.toBeNull();
     expect((seen as unknown as { outputActive: boolean }).outputActive).toBe(true);
     await client.disconnect();
@@ -230,10 +229,8 @@ describe('ObsV4Client — virtual cam poll (gap 3)', () => {
       count++;
     });
     await client.connect(url(), undefined, {});
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (client as any).pollVcamOnce();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (client as any).pollVcamOnce();
+    await client._testForcePollVcam();
+    await client._testForcePollVcam();
     expect(count).toBe(0);
     await client.disconnect();
   });

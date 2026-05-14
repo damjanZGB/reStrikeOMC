@@ -447,4 +447,17 @@ export class ObsV4Client implements IObsClient {
       // polling tolerates transient errors
     }
   }
+
+  /**
+   * P2-18: test hook. Production code calls pollVcamOnce on the 5s interval;
+   * tests don't want to wait 5 seconds, so they call this wrapper to force
+   * a one-shot poll. Public-but-prefixed name signals "internal API,
+   * subject to change". Pre-2026-05-13 tests cast to `any` to reach the
+   * private method — that locked them to the method name and made
+   * renames invisible refactors.
+   */
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  _testForcePollVcam(): Promise<void> {
+    return this.pollVcamOnce();
+  }
 }
