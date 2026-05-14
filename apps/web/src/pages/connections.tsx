@@ -18,8 +18,11 @@ import {
 } from '@/components/ui/dialog';
 import { Trash2, Wifi, Radar, Pencil } from 'lucide-react';
 import { ProtocolBadge } from '@/components/protocol-badge';
-
-type ProtocolChoice = 'default' | ObsProtocol;
+import {
+  protocolChoiceToValue,
+  protocolValueToChoice,
+  type ProtocolChoice,
+} from '@/lib/protocol-choice';
 
 interface AddFormState {
   name: string;
@@ -53,12 +56,8 @@ function toEditForm(c: ConnectionConfig): EditFormState {
     port: String(c.port),
     password: '',
     clearPassword: false,
-    protocol: c.protocol ?? 'default',
+    protocol: protocolValueToChoice(c.protocol),
   };
-}
-
-function protocolChoiceToValue(c: ProtocolChoice): ObsProtocol | null {
-  return c === 'default' ? null : c;
 }
 
 export function ConnectionsPage(): JSX.Element {
