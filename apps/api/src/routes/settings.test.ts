@@ -370,6 +370,71 @@ describe('/api/connections/:id/test against a v4 server (P1-11)', () => {
   });
 });
 
+// P2-13: changing the global default protocol does NOT re-resolve live
+// slots that were created with `protocol: null`. The contract: resolution
+// happens once at manager.add() time, and the slot keeps that resolved
+// protocol until it's explicitly removed/re-added (e.g. by a PATCH that
+// triggers reconnect). This test pins the contract so a future "helpful"
+// refactor that iterates obsManager on PUT /api/settings doesn't cause
+// unexpected mass reconnects mid-session.
+describe('PUT /api/settings does not re-resolve live NULL-protocol slots (P2-13)', () => {
+  it('keeps an existing connection on its original wire protocol when the default flips', async () => {
+    const mockV5 = await startMockObs({ password: null });
+    const { server, close } = await buildTestServer();
+    try {
+      const cookie = await login(server);
+      // Create a connection with protocol=null — it inherits the seeded
+      // 'v5' default at add() time.
+      const created = await server.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { cookie },
+        payload: {
+          name: 'inherits-default',
+          host: '127.0.0.1',
+          port: mockV5.port,
+          // No `protocol` field — inherits default.
+        },
+      });
+      const id = created.json().id as string;
+      await server.obsManager.waitForStatus(id, 'connected', 3000);
+
+      // Capture status events so we can confirm there's no disconnect cycle.
+      const statusEvents: string[] = [];
+      server.obsManager.on('status', (e) => {
+        if (e.connId === id) statusEvents.push(e.status);
+      });
+
+      // Flip the global default to v4.
+      const put = await server.inject({
+        method: 'PUT',
+        url: '/api/settings',
+        headers: { cookie },
+        payload: { defaultProtocol: 'v4' },
+      });
+      expect(put.statusCode).toBe(204);
+
+      // Give the manager a beat to (not) react.
+      await new Promise((r) => setTimeout(r, 200));
+
+      // The slot is still connected, still on v5 wire. No churn.
+      expect(server.obsManager.getStatus(id)).toBe('connected');
+      expect(statusEvents).toEqual([]);
+
+      // Round-trip a v5-vocab call to prove the wire is still v5. If the
+      // manager had silently re-resolved, this would either error
+      // (mockV5 doesn't speak v4) or the mock would receive a v4-shaped
+      // request.
+      await server.obsManager.call(id, 'SetCurrentProgramScene', {
+        sceneName: 'Scene 2',
+      });
+    } finally {
+      await close();
+      await mockV5.close();
+    }
+  }, 15_000);
+});
+
 // P2-15: integration test for ConnectionManager.call() against a v4 slot.
 // Phase B unit-tested the v4 client end-to-end and Phase E unit-tested the
 // translation pure functions, but no test wires the manager → v4 client

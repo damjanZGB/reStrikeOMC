@@ -19,6 +19,12 @@ export async function registerSettingsRoutes(
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_body', issues: parsed.error.issues });
     }
+    // Note: this updates the persisted default only. Already-connected
+    // slots are NOT re-resolved — they keep the protocol resolved at
+    // manager.add() time. Operators who want the new default applied
+    // immediately must reconnect each affected connection (or restart).
+    // Pinned by routes/settings.test.ts: "PUT /api/settings does not
+    // re-resolve live NULL-protocol slots".
     server.settings.setDefaultProtocol(parsed.data.defaultProtocol);
     return reply.code(204).send();
   });

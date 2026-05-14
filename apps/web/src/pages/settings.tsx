@@ -36,8 +36,10 @@ export function SettingsPage(): JSX.Element {
           <p className="text-sm text-muted-foreground">
             Sets the default protocol used by new connections and by any
             existing connection whose protocol field is left as
-            &quot;default&quot;. Existing connections with an explicit
-            v4/v5 choice are not affected.
+            &quot;default&quot;. Already-connected tiles keep the protocol
+            they were originally resolved with — to apply a new default
+            to an existing tile, edit and save it (any host/port/protocol
+            change triggers a reconnect under the resolved default).
           </p>
           <div className="grid gap-2">
             <Label htmlFor="settings-default-protocol">Default protocol</Label>
